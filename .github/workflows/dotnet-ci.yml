@@ -1,0 +1,31 @@
+name: .NET CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Setup .NET SDK
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: |
+          8.0.x
+          9.0.x
+
+    - name: Restore Dependencies
+      run: dotnet restore SpeedListener/SpeedListener.sln
+
+    - name: Build Solution
+      run: dotnet build SpeedListener/SpeedListener.sln --configuration Release --no-restore
+
+    - name: Run xUnit Tests
+      run: dotnet test SpeedListener/SpeedListener.sln --configuration Release --no-build --verbosity normal

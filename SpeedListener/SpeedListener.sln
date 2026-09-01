@@ -5,8 +5,6 @@ VisualStudioVersion = 17.14.36804.6 d17.14
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SpeedListener", "SpeedListener\SpeedListener.csproj", "{DDEDBB5A-5138-4F3F-A0B4-533579ADAE46}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SpeedEmiitter", "SpeedEmiitter\SpeedEmiitter.csproj", "{74999B8A-7EA3-4196-8EBA-34C56BD6428E}"
-EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SpeedListener.Tests", "SpeedListener.Tests\SpeedListener.Tests.csproj", "{FDF941B6-71DE-4FA9-9C0D-D7EC0A5450F2}"
 EndProject
 Global
@@ -19,10 +17,6 @@ Global
 		{DDEDBB5A-5138-4F3F-A0B4-533579ADAE46}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{DDEDBB5A-5138-4F3F-A0B4-533579ADAE46}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{DDEDBB5A-5138-4F3F-A0B4-533579ADAE46}.Release|Any CPU.Build.0 = Release|Any CPU
-		{74999B8A-7EA3-4196-8EBA-34C56BD6428E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{74999B8A-7EA3-4196-8EBA-34C56BD6428E}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{74999B8A-7EA3-4196-8EBA-34C56BD6428E}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{74999B8A-7EA3-4196-8EBA-34C56BD6428E}.Release|Any CPU.Build.0 = Release|Any CPU
 		{FDF941B6-71DE-4FA9-9C0D-D7EC0A5450F2}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{FDF941B6-71DE-4FA9-9C0D-D7EC0A5450F2}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{FDF941B6-71DE-4FA9-9C0D-D7EC0A5450F2}.Release|Any CPU.ActiveCfg = Release|Any CPU

@@ -1,6 +1,6 @@
 #region license
 // Copyright 2026 Utah Departement of Transportation
-// for SpeedListener - SpeedListener/Program.cs
+// for SpeedListener - SpeedListener.Commands.Options/IntervalOption.cs
 // 
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,29 +15,21 @@
 // limitations under the License.
 #endregion
 
-using SpeedListener.Commands;
 using System.CommandLine;
 
-namespace SpeedListener;
+namespace SpeedListener.Commands.Options;
 
 /// <summary>
-/// Entry point class for the ATSPM Speed Listener CLI Utility application.
+/// Command-line option for specifying the packet transmission interval in milliseconds.
 /// </summary>
-public class Program
+public class IntervalOption : Option<int?>
 {
     /// <summary>
-    /// Core main execution entry point.
+    /// Initializes a new instance of the <see cref="IntervalOption"/> class.
     /// </summary>
-    /// <param name="args">The command-line arguments passed to the utility.</param>
-    /// <returns>Returns the command-line exit execution code.</returns>
-    public static async Task<int> Main(string[] args)
+    public IntervalOption() : base(
+        aliases: new[] { "--interval", "-i", "--interval-ms" },
+        description: "Transmission interval in milliseconds (optional, fallbacks to configuration/env)")
     {
-        var rootCommand = new RootCommand("ATSPM Speed Listener Utility")
-        {
-            new EmmitterCommand(),
-            new ListenerCommand()
-        };
-
-        return await rootCommand.InvokeAsync(args);
     }
 }

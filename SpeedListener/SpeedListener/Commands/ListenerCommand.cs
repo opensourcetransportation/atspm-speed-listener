@@ -1,6 +1,6 @@
 #region license
 // Copyright 2026 Utah Departement of Transportation
-// for SpeedListener - SpeedListener/Program.cs
+// for SpeedListener - SpeedListener.Commands/ListenerCommand.cs
 // 
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,29 +15,20 @@
 // limitations under the License.
 #endregion
 
-using SpeedListener.Commands;
 using System.CommandLine;
 
-namespace SpeedListener;
-
-/// <summary>
-/// Entry point class for the ATSPM Speed Listener CLI Utility application.
-/// </summary>
-public class Program
+namespace SpeedListener.Commands
 {
     /// <summary>
-    /// Core main execution entry point.
+    /// Command for starting the speed sensor data listener service.
     /// </summary>
-    /// <param name="args">The command-line arguments passed to the utility.</param>
-    /// <returns>Returns the command-line exit execution code.</returns>
-    public static async Task<int> Main(string[] args)
+    public class ListenerCommand : Command
     {
-        var rootCommand = new RootCommand("ATSPM Speed Listener Utility")
+        /// <summary>
+        /// Initializes a new instance of the <see cref="ListenerCommand"/> class.
+        /// </summary>
+        public ListenerCommand() : base("listener", "Starts listener on configured port and protocol")
         {
-            new EmmitterCommand(),
-            new ListenerCommand()
-        };
-
-        return await rootCommand.InvokeAsync(args);
+        }
     }
 }

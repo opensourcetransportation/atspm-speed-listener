@@ -1,6 +1,6 @@
 #region license
 // Copyright 2026 Utah Departement of Transportation
-// for SpeedListener - SpeedListener/Program.cs
+// for SpeedListener - SpeedListener.Commands.Options/PortOption.cs
 // 
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,29 +15,21 @@
 // limitations under the License.
 #endregion
 
-using SpeedListener.Commands;
 using System.CommandLine;
 
-namespace SpeedListener;
+namespace SpeedListener.Commands.Options;
 
 /// <summary>
-/// Entry point class for the ATSPM Speed Listener CLI Utility application.
+/// Command-line option for specifying the target speed listener port.
 /// </summary>
-public class Program
+public class PortOption : Option<int?>
 {
     /// <summary>
-    /// Core main execution entry point.
+    /// Initializes a new instance of the <see cref="PortOption"/> class.
     /// </summary>
-    /// <param name="args">The command-line arguments passed to the utility.</param>
-    /// <returns>Returns the command-line exit execution code.</returns>
-    public static async Task<int> Main(string[] args)
+    public PortOption() : base(
+        aliases: new[] { "--port", "-p", "--listener-port" },
+        description: "Target speed listener port (optional, fallbacks to configuration/env)")
     {
-        var rootCommand = new RootCommand("ATSPM Speed Listener Utility")
-        {
-            new EmmitterCommand(),
-            new ListenerCommand()
-        };
-
-        return await rootCommand.InvokeAsync(args);
     }
 }

@@ -45,6 +45,7 @@ public class SpeedEmitterServiceTests
     {
         _deviceRepositoryMock = new Mock<IDeviceRepository>();
         _loggerMock = new Mock<ILogger<SpeedEmitterService>>();
+        _loggerMock.Setup(x => x.IsEnabled(It.IsAny<LogLevel>())).Returns(true);
         _config = new SpeedEmitterConfiguration
         {
             ListenerHost = "127.0.0.1",

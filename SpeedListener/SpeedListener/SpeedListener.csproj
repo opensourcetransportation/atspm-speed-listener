@@ -19,8 +19,8 @@
   <ItemGroup>
     <Folder Include="Commands\Options\" />
     <Folder Include="Configuration\" />
-    <Folder Include="BackgroundServices\" />
     <Folder Include="LogMessages\" />
+    <Folder Include="Services\" />
   </ItemGroup>
 
 	<ItemGroup>

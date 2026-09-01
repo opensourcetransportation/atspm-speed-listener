@@ -1,0 +1,31 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.14.36804.6 d17.14
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SpeedListener", "SpeedListener\SpeedListener.csproj", "{DDEDBB5A-5138-4F3F-A0B4-533579ADAE46}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SpeedListener.Tests", "SpeedListener.Tests\SpeedListener.Tests.csproj", "{FDF941B6-71DE-4FA9-9C0D-D7EC0A5450F2}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{DDEDBB5A-5138-4F3F-A0B4-533579ADAE46}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{DDEDBB5A-5138-4F3F-A0B4-533579ADAE46}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{DDEDBB5A-5138-4F3F-A0B4-533579ADAE46}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{DDEDBB5A-5138-4F3F-A0B4-533579ADAE46}.Release|Any CPU.Build.0 = Release|Any CPU
+		{FDF941B6-71DE-4FA9-9C0D-D7EC0A5450F2}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FDF941B6-71DE-4FA9-9C0D-D7EC0A5450F2}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FDF941B6-71DE-4FA9-9C0D-D7EC0A5450F2}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FDF941B6-71DE-4FA9-9C0D-D7EC0A5450F2}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {107728B6-86E3-477A-B5CB-446F91B157AC}
+	EndGlobalSection
+EndGlobal

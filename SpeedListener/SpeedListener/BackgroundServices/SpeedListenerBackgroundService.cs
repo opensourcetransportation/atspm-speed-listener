@@ -17,12 +17,9 @@ public sealed class SpeedListenerBackgroundService(
     IDeviceMappingProvider mappingProvider,
     ISpeedEventBatchProcessor batchProcessor,
     IOptions<SpeedListenerConfiguration> options,
+    SpeedListenerMetrics metrics,
     ILogger<SpeedListenerBackgroundService> logger) : BackgroundService
 {
-    private long _received;
-    private long _rejected;
-    private long _dropped;
-
     /// <inheritdoc/>
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -38,26 +35,29 @@ public sealed class SpeedListenerBackgroundService(
         using var processingCancellation = new CancellationTokenSource();
         var producer = receiver.ReceiveAsync((datagram, _) =>
         {
-            Interlocked.Increment(ref _received);
+            metrics.RecordReceived();
             var result = parser.Parse(datagram);
             if (!result.IsSuccess)
             {
-                Interlocked.Increment(ref _rejected);
-                logger.LogWarning("Rejected speed packet from {RemoteEndPoint}: {Reason}",
+                metrics.RecordRejected();
+                logger.LogDebug("Rejected speed packet from {RemoteEndPoint}: {Reason}",
                     datagram.RemoteEndPoint, result.Error);
             }
             else if (!channel.Writer.TryWrite(result.Event!))
             {
-                Interlocked.Increment(ref _dropped);
-                logger.LogWarning("Speed-event channel is full; dropping newest event for detector {DetectorId}",
-                    result.Event!.DetectorId);
+                metrics.RecordDropped();
             }
+            else metrics.RecordParsed();
 
             return ValueTask.CompletedTask;
         }, receiveCancellation.Token);
         var consumer = batchProcessor.ProcessAsync(channel.Reader, processingCancellation.Token);
 
         logger.LogInformation("Speed listener started on UDP port {Port}", options.Value.UdpPort);
+        using var summaryCancellation = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+        var summary = LogSummariesAsync(channel.Reader, summaryCancellation.Token);
+        try
+        {
         var firstCompleted = await Task.WhenAny(producer, consumer);
 
         if (firstCompleted == consumer && !producer.IsCompleted)
@@ -93,7 +93,8 @@ public sealed class SpeedListenerBackgroundService(
             }
             catch (OperationCanceledException) when (processingCancellation.IsCancellationRequested)
             {
-                var remaining = channel.Reader.CanCount ? channel.Reader.Count : -1;
+                var queued = channel.Reader.CanCount ? channel.Reader.Count : -1;
+                var remaining = queued < 0 ? -1 : queued + batchProcessor.InFlightEventCount;
                 logger.LogError("Speed listener shutdown exceeded its drain deadline with {Remaining} queued events", remaining);
                 throw new TimeoutException("The speed listener could not drain its event channel before shutdown.");
             }
@@ -110,6 +111,38 @@ public sealed class SpeedListenerBackgroundService(
 
         logger.LogInformation(
             "Speed listener stopped. Received {Received}, rejected {Rejected}, and dropped {Dropped} packets",
-            _received, _rejected, _dropped);
+            metrics.Received, metrics.Rejected, metrics.Dropped);
+        }
+        finally
+        {
+            summaryCancellation.Cancel();
+            try { await summary; } catch (OperationCanceledException) { }
+        }
+    }
+
+    private async Task LogSummariesAsync(ChannelReader<SpeedEvent> reader, CancellationToken cancellationToken)
+    {
+        using var timer = new PeriodicTimer(options.Value.SummaryInterval);
+        long previousRejected = 0, previousUnknown = 0, previousDropped = 0;
+        while (await timer.WaitForNextTickAsync(cancellationToken))
+        {
+            var rejected = metrics.Rejected;
+            var unknown = metrics.Unknown;
+            var dropped = metrics.Dropped;
+            logger.LogInformation(
+                "SpeedListenerSummary Received={Received} Parsed={Parsed} Rejected={Rejected} Unknown={Unknown} ChannelDepth={ChannelDepth} Dropped={Dropped} BatchesPublished={BatchesPublished} EnvelopesPublished={EnvelopesPublished} PublishLatencyMs={PublishLatencyMs} Retries={Retries} PublishFailures={PublishFailures} PoisonBatches={PoisonBatches} MappingAgeSeconds={MappingAgeSeconds} MappingRefreshFailures={MappingRefreshFailures}",
+                metrics.Received, metrics.Parsed, metrics.Rejected, metrics.Unknown,
+                reader.CanCount ? reader.Count : -1, metrics.Dropped, metrics.BatchesPublished,
+                metrics.EnvelopesPublished, metrics.AveragePublishLatencyMilliseconds, metrics.Retries,
+                metrics.PublishFailures, metrics.PoisonBatches, metrics.MappingAge?.TotalSeconds ?? -1,
+                metrics.MappingRefreshFailures);
+            if (rejected > previousRejected || unknown > previousUnknown || dropped > previousDropped)
+                logger.LogWarning(
+                    "SpeedListenerLossSummary RejectedSinceLast={RejectedSinceLast} UnknownSinceLast={UnknownSinceLast} DroppedSinceLast={DroppedSinceLast}",
+                    rejected - previousRejected, unknown - previousUnknown, dropped - previousDropped);
+            previousRejected = rejected;
+            previousUnknown = unknown;
+            previousDropped = dropped;
+        }
     }
 }

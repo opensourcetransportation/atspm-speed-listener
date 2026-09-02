@@ -45,6 +45,17 @@ public sealed class SpeedPacketParserTests
         Assert.Equal(new DateTime(2026, 9, 2, 18, 30, 0, DateTimeKind.Utc), result.Event!.Timestamp);
     }
 
+    [Fact]
+    public void Parse_NulPaddedTimestamp_ConvertsToUtc()
+    {
+        var basePacket = Packet("ABC123", 25, 40);
+        var suffix = Encoding.ASCII.GetBytes("\0~\02026-09-02T18:30:00Z\0");
+
+        var result = _parser.Parse(Datagram(basePacket.Concat(suffix).ToArray()));
+
+        Assert.Equal(new DateTime(2026, 9, 2, 18, 30, 0, DateTimeKind.Utc), result.Event!.Timestamp);
+    }
+
     private static byte[] Packet(string detectorId, byte mph, byte kph)
     {
         var packet = new byte[16];

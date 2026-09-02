@@ -21,6 +21,17 @@ public sealed class ArchiveEnvelopeDataEvents(ExecutionDataflowBlockOptions? opt
         EventBatchEnvelope envelope,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        foreach (var compressed in Archive(envelope, cancellationToken))
+            yield return compressed;
+
+        await Task.CompletedTask;
+    }
+
+    /// <summary>Archives one envelope into its hourly compressed event-log rows.</summary>
+    public static IEnumerable<CompressedEventLogBase> Archive(
+        EventBatchEnvelope envelope,
+        CancellationToken cancellationToken = default)
+    {
         var rawEvents = ((JArray)envelope.Items).ToObject<List<SpeedEvent>>() ?? [];
         rawEvents.ForEach(speedEvent => speedEvent.LocationIdentifier = envelope.LocationIdentifier);
 
@@ -51,7 +62,5 @@ public sealed class ArchiveEnvelopeDataEvents(ExecutionDataflowBlockOptions? opt
             compressed.Data = list;
             yield return compressed;
         }
-
-        await Task.CompletedTask;
     }
 }

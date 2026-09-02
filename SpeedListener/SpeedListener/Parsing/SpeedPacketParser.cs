@@ -1,4 +1,6 @@
 using SpeedListener.Receivers;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using System.Globalization;
 using System.Text;
 using Utah.Udot.Atspm.Data.Models.EventLogModels;
@@ -6,14 +8,18 @@ using Utah.Udot.Atspm.Data.Models.EventLogModels;
 namespace SpeedListener.Parsing;
 
 /// <summary>Parses the legacy speed sensor packet format used by PR #217.</summary>
-public sealed class SpeedPacketParser : ISpeedPacketParser
+public sealed class SpeedPacketParser(ILogger<SpeedPacketParser>? logger = null) : ISpeedPacketParser
 {
+    private readonly ILogger<SpeedPacketParser> _logger = logger ?? NullLogger<SpeedPacketParser>.Instance;
+
     /// <inheritdoc/>
     public SpeedPacketParseResult Parse(UdpDatagram datagram)
     {
         var data = datagram.Buffer;
         if (data.Length < 16)
             return SpeedPacketParseResult.Failure($"Expected at least 16 bytes but received {data.Length}.");
+
+        _logger.LogDebug("Observed speed-packet header byte {HeaderByte}", data[7]);
 
         var detectorId = Encoding.ASCII.GetString(data, 10, 6).Trim();
         if (string.IsNullOrWhiteSpace(detectorId))
@@ -23,7 +29,7 @@ public sealed class SpeedPacketParser : ISpeedPacketParser
         if (data.Length > 16)
         {
             var timestampText = Encoding.ASCII.GetString(data, 16, data.Length - 16)
-                .TrimStart('~', '\r', '\n', ' ')
+                .TrimStart('~', '\r', '\n', '\0', ' ')
                 .TrimEnd('\r', '\n', '\0', ' ');
 
             if (!string.IsNullOrWhiteSpace(timestampText) &&

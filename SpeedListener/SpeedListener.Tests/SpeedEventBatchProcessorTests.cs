@@ -26,6 +26,7 @@ public sealed class SpeedEventBatchProcessorTests
 
         Assert.Single(publisher.Batches);
         Assert.Equal(2, publisher.Batches[0].Count);
+        Assert.Equal(1, publisher.AttemptBudgets[0]);
         var firstEnvelope = Assert.Single(publisher.Batches[0], envelope => envelope.DeviceId == 1);
         Assert.Equal(first, firstEnvelope.Start);
         Assert.Equal(first.AddSeconds(1), firstEnvelope.End);
@@ -60,6 +61,7 @@ public sealed class SpeedEventBatchProcessorTests
         });
         return new SpeedEventBatchProcessor(
             new StubMappingProvider(), publisher, configuration, TimeProvider.System,
+            new SpeedListenerMetrics(TimeProvider.System),
             NullLogger<SpeedEventBatchProcessor>.Instance);
     }
 
@@ -88,15 +90,17 @@ public sealed class SpeedEventBatchProcessorTests
     private sealed class RecordingPublisher : IEventPublisher<EventBatchEnvelope>
     {
         public List<IReadOnlyList<EventBatchEnvelope>> Batches { get; } = [];
+        public List<int?> AttemptBudgets { get; } = [];
         public TaskCompletionSource Published { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public Task PublishAsync(EventBatchEnvelope message, CancellationToken cancellationToken = default) =>
             PublishAsync([message], 1, cancellationToken);
 
         public Task PublishAsync(IReadOnlyList<EventBatchEnvelope> batch, int parallelism,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default, int? maxAttempts = null)
         {
             Batches.Add(batch);
+            AttemptBudgets.Add(maxAttempts);
             Published.TrySetResult();
             return Task.CompletedTask;
         }

@@ -152,11 +152,11 @@ The pipeline shape is preserved. These specific behaviors are not, because each 
 
 **Unconditional TLS bypass.** `Program.cs` configures `DangerousAcceptAnyServerCertificateValidator` on the ingest HTTP client. The client is removed entirely with the API path, so this does not migrate.
 
-**Timestamp reinterpretation.** The parser's `DateTime.TryParse` plus `SpecifyKind(..., Utc)` can reinterpret values incorrectly. Replaced with an explicit format agreed from real packet samples. Because `Timestamp` participates in the value equality that drives deduplication, the convention must match `TransferSpeedEventsService` exactly or silent duplicate rows result. Note the prototype host also sets `AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true)`; whichever convention applies must be stated in one place.
+**Timestamp reinterpretation.** The parser's `DateTime.TryParse` plus `SpecifyKind(..., Utc)` can reinterpret values incorrectly. The implemented convention converts offset-bearing suffixes to UTC and uses the UDP receipt time in UTC when the suffix is absent or invalid. The host retains `Npgsql.EnableLegacyTimestampBehavior` because the ATSPM PostgreSQL model stores `DateTime` in `timestamp` columns. `DateTime` equality compares ticks rather than `Kind`, but captured production packets and a row-by-row comparison with `TransferSpeedEventsService` remain release gates before claiming wire compatibility.
 
 **Host shutdown budget.** The generic host's `ShutdownTimeout` defaults to five seconds and will terminate the process before a longer final flush completes. Configured from `ShutdownFlushTimeout`.
 
-**Terminal write failures.** A schema or constraint failure cannot be safely attributed to one event after envelopes enter the shared workflow. It therefore fails the service visibly rather than silently dropping a potentially valid batch. Invalid packets and mappings are rejected before persistence. A future poison-message policy requires a durable quarantine mechanism.
+**Terminal write failures.** Provider error codes distinguish transient, batch-data, and systemic failures. A batch-data constraint violation is isolated to individual device envelopes, dropped with explicit identity and counters, and escalated to a fatal device-scope failure after a bounded number of consecutive drops. Schema and model mismatches fail immediately. Invalid packets and mappings are rejected before persistence.
 
 This applies only to failures caused by one batch's data. A schema or model mismatch is systemic: every batch fails identically, so dropping each one and continuing would run a service that looks healthy while discarding all data indefinitely, which is the same silent loss this section exists to remove. Systemic failures must fail the process. Section 9 draws the line.
 
@@ -236,7 +236,7 @@ Duplicate identifiers, blank identifiers, and missing locations are configuratio
 
 `DatabaseEventPublisher` moves across as-is except for the swallowed-exception defect in section 5. It continues to construct an `EventBatchEnvelopeWorkflow`, send envelopes into it, complete the input, and await the step completions.
 
-Retry transient database failures with bounded exponential backoff and jitter. This is safe because `Upsert` is idempotent over value-equal events. Do not retry constraint or schema violations; propagate them so the service fails visibly.
+Retry transient database failures with bounded exponential backoff and jitter. This is safe because `Upsert` is idempotent over value-equal events. Do not retry constraint or schema violations. Isolate and drop batch-data constraint failures, escalating repeated drops for one device; propagate schema and model failures immediately.
 
 The workflow's archive step takes a parallelism degree; its save step is hard-coded to `MaxDegreeOfParallelism = 1`. Do not raise save concurrency: concurrent writers to the same device-hour lose events, per section 4.1.
 
@@ -250,11 +250,14 @@ Use a single `SpeedListenerConfiguration` section. Database connection configura
 | `ChannelCapacity` | `100000` | Maximum parsed events waiting for batching |
 | `BatchSize` | `5000` | Maximum events in an in-memory batch |
 | `FlushInterval` | `00:00:30` | Maximum age of a non-empty partial batch |
-| `ShutdownFlushTimeout` | `00:00:30` | Maximum shutdown drain/flush time |
+| `ShutdownFlushTimeout` | `00:00:45` | Maximum shutdown drain/flush time; must exceed one `WriteTimeout` |
+| `ShutdownMaxWriteAttempts` | `1` | Reduced attempt budget for shutdown writes |
 | `DeviceMappingRefreshInterval` | `00:05:00` | Mapping-cache lifetime |
 | `ArchiveParallelism` | `50` | Archive-step `MaxDegreeOfParallelism` in the workflow |
 | `WriteTimeout` | `00:00:30` | Timeout for one publish attempt |
 | `MaxWriteAttempts` | `3` | Total attempts for transient database failures |
+| `PoisonDeviceFailureThreshold` | `3` | Consecutive data-attributable drops before device-scope failure |
+| `SummaryInterval` | `00:01:00` | Structured operational-summary interval |
 
 ```json
 {
@@ -263,11 +266,14 @@ Use a single `SpeedListenerConfiguration` section. Database connection configura
     "ChannelCapacity": 100000,
     "BatchSize": 5000,
     "FlushInterval": "00:00:30",
-    "ShutdownFlushTimeout": "00:00:30",
+    "ShutdownFlushTimeout": "00:00:45",
+    "ShutdownMaxWriteAttempts": 1,
     "DeviceMappingRefreshInterval": "00:05:00",
     "ArchiveParallelism": 50,
     "WriteTimeout": "00:00:30",
-    "MaxWriteAttempts": 3
+    "MaxWriteAttempts": 3,
+    "PoisonDeviceFailureThreshold": 3,
+    "SummaryInterval": "00:01:00"
   }
 }
 ```
@@ -277,7 +283,7 @@ Changes from the prototype's configuration:
 - `ApiBaseUrl` and `ApiEndPoint` are removed with the HTTP path.
 - `threads` is renamed to `ArchiveParallelism` and keeps its default of 50. The prototype's name was lower-case and ambiguous; it feeds only the archive step's `MaxDegreeOfParallelism`, not save concurrency.
 - `BatchSize` drops from 50,000 to 5,000, and `FlushInterval` is new. See section 5.
-- `ChannelCapacity`, `ShutdownFlushTimeout`, `DeviceMappingRefreshInterval`, `WriteTimeout`, and `MaxWriteAttempts` are new, supporting the corrections in section 5.
+- `ChannelCapacity`, `ShutdownFlushTimeout`, `ShutdownMaxWriteAttempts`, `DeviceMappingRefreshInterval`, `WriteTimeout`, `MaxWriteAttempts`, `PoisonDeviceFailureThreshold`, and `SummaryInterval` are new, supporting the corrections in sections 5, 6, 9, and 10.
 
 Validate options at startup. Ports, positive capacities, `BatchSize <= ChannelCapacity`, timeouts, and retry limits must fail fast with actionable messages.
 
@@ -313,13 +319,13 @@ Refactor the current emitter-specific `HostBootstrapper.RunHostAsync<TService>` 
 
 | Failure | Required behavior |
 | --- | --- |
-| Malformed packet | Skip, increment in-process counter, structured debug/warning log without packet payload |
+| Malformed packet | Skip, increment in-process counter, structured debug log without packet payload, and rate-limited warning summary |
 | Unknown sensor | Skip, increment in-process counter, rate-limited warning |
 | Mapping database unavailable at startup | Fail startup so the service can be restarted |
 | Mapping refresh fails after startup | Continue with last known mapping, log degraded state, retry later |
 | Channel full | Apply configured drop policy and log a rate-limited warning with a running dropped count |
 | Transient database failure | Bounded retry; preserve the current batch in memory |
-| Constraint violation | Do not retry or discard silently. Log the batch identity and fail the service. |
+| Constraint violation attributable to batch data | Do not retry. Isolate the device envelope, log and count the drop, continue below the configured device threshold. |
 | Schema or model mismatch | Fail the service immediately. Do not drop and continue. |
 | Sustained database failure past the retry budget | Fail the service after logging batch identity and event count; do not silently discard |
 | Host cancellation | Stop receive, drain what the shutdown budget allows, report the residue |
@@ -405,7 +411,7 @@ After successful cutover, remove the EventListener executable and listener-speci
 - A replayed identical batch produces no duplicate stored events.
 - Size-, time-, and shutdown-triggered flushes are verified.
 - Unknown or malformed input cannot crash the receive loop or grow memory without bound.
-- A constraint or schema violation is reported and terminates the service without being silently discarded.
+- A batch-data constraint violation is isolated and reported; repeated drops for one device terminate the service, while a schema/model violation terminates immediately.
 - Publish failures are retried only when transient and are never silently discarded.
 - Container shutdown completes within `ShutdownFlushTimeout`, with `HostOptions.ShutdownTimeout` configured to allow it.
 - Shutdown with a channel too full to drain in the budget reports the undrained event count at error level and exits non-successfully, rather than reporting success.

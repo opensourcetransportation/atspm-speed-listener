@@ -50,10 +50,15 @@ public static class HostBootstrapper
                     configuration.BatchSize <= configuration.ChannelCapacity &&
                     configuration.FlushInterval > TimeSpan.Zero &&
                     configuration.ShutdownFlushTimeout > TimeSpan.Zero &&
+                    configuration.ShutdownFlushTimeout > configuration.WriteTimeout &&
+                    configuration.ShutdownMaxWriteAttempts > 0 &&
+                    configuration.ShutdownMaxWriteAttempts <= configuration.MaxWriteAttempts &&
                     configuration.DeviceMappingRefreshInterval > TimeSpan.Zero &&
                     configuration.ArchiveParallelism > 0 &&
                     configuration.WriteTimeout > TimeSpan.Zero &&
-                    configuration.MaxWriteAttempts > 0,
+                    configuration.MaxWriteAttempts > 0 &&
+                    configuration.PoisonDeviceFailureThreshold > 0 &&
+                    configuration.SummaryInterval > TimeSpan.Zero,
                     "Speed listener configuration is missing or invalid.")
                 .ValidateOnStart();
 
@@ -61,6 +66,7 @@ public static class HostBootstrapper
                 .Configure<IOptions<SpeedListenerConfiguration>>((hostOptions, listenerOptions) =>
                     hostOptions.ShutdownTimeout = listenerOptions.Value.ShutdownFlushTimeout + TimeSpan.FromSeconds(5));
             services.AddSingleton(TimeProvider.System);
+            services.AddSingleton<SpeedListenerMetrics>();
             services.AddAtspmDbContext(hostContext);
             services.AddAtspmEFConfigRepositories();
             services.AddAtspmEFEventLogRepositories();

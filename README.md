@@ -41,11 +41,14 @@ format, for example `SpeedListenerConfiguration__UdpPort=10088`.
 | `ChannelCapacity` | `100000` | Maximum queued parsed events |
 | `BatchSize` | `5000` | Size-triggered flush threshold |
 | `FlushInterval` | `00:00:30` | Maximum age of a partial batch |
-| `ShutdownFlushTimeout` | `00:00:30` | Deadline for draining during shutdown |
+| `ShutdownFlushTimeout` | `00:00:45` | Deadline for draining during shutdown; must exceed `WriteTimeout` |
+| `ShutdownMaxWriteAttempts` | `1` | Attempts per publish while draining |
 | `DeviceMappingRefreshInterval` | `00:05:00` | ATSPM device-cache refresh interval |
 | `ArchiveParallelism` | `50` | Parallelism for envelope compression |
 | `WriteTimeout` | `00:00:30` | Database write-attempt timeout |
 | `MaxWriteAttempts` | `3` | Attempts for transient database failures |
+| `PoisonDeviceFailureThreshold` | `3` | Consecutive data-attributable drops before failing one device scope |
+| `SummaryInterval` | `00:01:00` | Structured summary and loss-warning interval |
 
 ATSPM `DatabaseConfiguration` settings configure the configuration and event-log
 databases through the NuGet-provided registration extensions. Do not commit
@@ -60,7 +63,7 @@ bytes 10-15, and an optional timestamp suffix. Parsed events are mapped to ATSPM
 logs, and upserted through the packaged event-log repository.
 
 The in-memory channel is bounded. When it is full, the newest event is dropped
-and logged. UDP itself is not reliable, and this release has no durable spool, so
+and counted in rate-limited summary logs. UDP itself is not reliable, and this release has no durable spool, so
 process crashes or sustained database outages can also lose events. Run only one
 listener against a production sensor stream and event-log database because the
 ATSPM upsert path is a read-modify-write operation.

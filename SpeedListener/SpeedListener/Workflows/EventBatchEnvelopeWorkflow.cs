@@ -32,6 +32,8 @@ public sealed class EventBatchEnvelopeWorkflow(
             if (_initialized) return Task.CompletedTask;
             Steps = [];
             var options = new DataflowBlockOptions { CancellationToken = cancellationToken };
+            // This broadcast is safe only while the sole linked target accepts immediately. Do not add a bounded
+            // target without replacing it: BroadcastBlock may overwrite a value that has not been accepted.
             Input = new BroadcastBlock<EventBatchEnvelope>(value => value, options);
             Output = new BufferBlock<CompressedEventLogBase>(options);
             InstantiateSteps();

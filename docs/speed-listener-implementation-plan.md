@@ -13,7 +13,7 @@ Out of scope throughout: authentication, metrics instrumentation, health-check e
 - [x] Confirm the storage contract the migrated path writes into: primary key `{ LocationIdentifier, DeviceId, DataType, Start, End }`, `LocationIdentifier` limited to 10 characters, `DataType` to 32, `Data` behind a compressing value converter, `Upsert` implemented as read-decompress-union-recompress-write. No change to any of this is planned; it is recorded so tests assert the right things.
 - [ ] Pin a compatible ATSPM package set (starting with the existing `Utah.Udot.Atspm.Infrastructure` 5.3.1 reference) and record direct versus transitive dependencies.
 - [ ] Add compile-time characterization tests or usages for the package-owned contracts above, including one round trip through `Upsert`, so a package upgrade that changes union semantics fails the build rather than production.
-- [ ] Confirm the `DateTimeKind` convention used by the deployed event-log tables and whether `Npgsql.EnableLegacyTimestampBehavior` is required, then record the single convention this service will use. `Timestamp` participates in `SpeedEvent` value equality, so a mismatch with `TransferSpeedEventsService` produces silent duplicate rows.
+- [x] Record the implementation convention: convert offset-bearing device timestamps to UTC, otherwise use UTC receipt time, and retain `Npgsql.EnableLegacyTimestampBehavior` for ATSPM's PostgreSQL `timestamp` columns. Captured-packet and backfill comparisons remain release gates.
 - [ ] Obtain sanitized packet captures from each deployed sensor or firmware variant and document timestamp and header variants. If captures are not available in time, proceed with synthetic fixtures under one explicitly recorded timestamp format and treat real-capture validation as a phase 7 gate rather than a phase 0 blocker.
 - [ ] Note for the record any speed-sensor `DeviceIdentifier` longer than six characters or sharing a six-character prefix with another. The wire format carries exactly six ASCII bytes, so such devices cannot be matched by an incoming packet. No runtime validation is added for this; the audit exists so an unmapped sensor in shadow mode is explainable.
 - [ ] Run and record the repository's clean baseline build and tests.
@@ -66,8 +66,8 @@ Exit criteria: one database read produces an immutable lookup, batches do not qu
 - [ ] Move `DatabaseEventPublisher`, `EventBatchEnvelopeWorkflow`, and `ArchiveEnvelopeDataEvents` into this repository unchanged in behavior. Continue to consume `SaveArchivedEventLogs` and `Upsert` from the packages.
 - [ ] Do not migrate `HttpPublisher`, `KafkaPublisher`, `PubSubPublisher`, or the `IngestApi` HTTP client, and do not migrate `DangerousAcceptAnyServerCertificateValidator` with them.
 - [x] Replace `DatabaseEventPublisher.PublishAsync(IReadOnlyList<...>, ...)`'s catch-log-and-return with bounded retry for transient failures and propagation of all terminal failures. Retry is safe because `Upsert` is idempotent over value-equal events.
-- [x] Never let a constraint, schema, or model mismatch drop batches and continue; the shared workflow cannot reliably isolate one poison event.
-- [ ] Do not let a schema or model mismatch drop batches and continue. Every batch fails identically, so the service would report healthy while discarding all ingest indefinitely, reintroducing the catch-log-and-return defect this phase removes.
+- [x] Classify provider errors centrally. Isolate batch-data constraint failures to device envelopes and escalate repeated drops; fail immediately on schema or model mismatch.
+- [x] Do not let a schema or model mismatch drop batches and continue. Every batch fails identically, so the service would report healthy while discarding all ingest indefinitely, reintroducing the catch-log-and-return defect this phase removes.
 - [ ] Wire `ArchiveParallelism` to the workflow's archive step. Leave the save step at `MaxDegreeOfParallelism = 1`; raising it would let concurrent writers to the same device-hour lose events.
 - [ ] Apply `WriteTimeout` per attempt and pass the host cancellation token through, replacing the prototype's `CancellationToken.None`.
 - [ ] Add tests for envelope construction, workflow completion, transient retry, replayed-batch idempotency, schema-mismatch process failure, terminal failure, and cancellation.
@@ -81,9 +81,9 @@ Exit criteria: the migrated path produces the same compressed-event-log rows as 
 - [ ] Implement a single-consumer batch processor with size- and interval-triggered flushes. The prototype has no time-based flush, so below `BatchSize` events remain buffered until shutdown.
 - [ ] Replace `_ = SendBatchAsync(toSend)` with an awaited publish on the consumer, so faults are observed and shutdown can wait for in-flight work.
 - [ ] Build one envelope per mapped device from the cached lookup, preserving the prototype's grouping and `Start`/`End` from group minimum and maximum timestamps.
-- [ ] Rate-limit unknown-sensor and channel-drop warnings, and maintain in-process counters for the periodic summary log.
+- [x] Rate-limit rejected-packet, unknown-sensor, and channel-drop warnings, and maintain in-process counters for the periodic summary log.
 - [ ] Retain a failed in-memory batch until the retry policy is exhausted; propagate terminal failure.
-- [ ] Implement channel completion and a best-effort drain bounded by `ShutdownFlushTimeout`, publishing queued batches in order under a reduced attempt budget so the fixed time covers as many batches as possible.
+- [x] Implement channel completion and a best-effort drain bounded by `ShutdownFlushTimeout`, publishing queued batches in order under a single-attempt default so the fixed time covers as many batches as possible.
 - [ ] On budget expiry, stop draining, count the events still queued plus any in-flight batch, log that residue at error level, and exit non-successfully. A full channel cannot be drained in any deployable budget, so shutdown must report what it lost rather than claim success.
 - [ ] Add deterministic tests using a fake clock and completion signals, covering flush by size, flush by interval, flush on shutdown, and multi-sensor grouping.
 

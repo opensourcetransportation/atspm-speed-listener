@@ -18,7 +18,11 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
+using SpeedListener.BackgroundServices;
 using SpeedListener.Configuration;
+using SpeedListener.Parsing;
+using SpeedListener.Publishing;
+using SpeedListener.Receivers;
 using SpeedListener.Services;
 using Utah.Udot.Atspm.Infrastructure.Extensions;
 
@@ -29,6 +33,56 @@ namespace SpeedListener;
 /// </summary>
 public static class HostBootstrapper
 {
+    /// <summary>Runs the speed listener host.</summary>
+    public static async Task RunListenerHostAsync(Action<SpeedListenerConfiguration> configureAction)
+    {
+        AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
+        var builder = Host.CreateDefaultBuilder();
+        builder.ConfigureServices((hostContext, services) =>
+        {
+            services.AddOptions<SpeedListenerConfiguration>()
+                .Bind(hostContext.Configuration.GetSection(nameof(SpeedListenerConfiguration)))
+                .Configure(configureAction)
+                .Validate(configuration =>
+                    configuration.UdpPort is > 0 and <= 65535 &&
+                    configuration.ChannelCapacity > 0 &&
+                    configuration.BatchSize > 0 &&
+                    configuration.BatchSize <= configuration.ChannelCapacity &&
+                    configuration.FlushInterval > TimeSpan.Zero &&
+                    configuration.ShutdownFlushTimeout > TimeSpan.Zero &&
+                    configuration.DeviceMappingRefreshInterval > TimeSpan.Zero &&
+                    configuration.ArchiveParallelism > 0 &&
+                    configuration.WriteTimeout > TimeSpan.Zero &&
+                    configuration.MaxWriteAttempts > 0,
+                    "Speed listener configuration is missing or invalid.")
+                .ValidateOnStart();
+
+            services.AddOptions<HostOptions>()
+                .Configure<IOptions<SpeedListenerConfiguration>>((hostOptions, listenerOptions) =>
+                    hostOptions.ShutdownTimeout = listenerOptions.Value.ShutdownFlushTimeout + TimeSpan.FromSeconds(5));
+            services.AddSingleton(TimeProvider.System);
+            services.AddAtspmDbContext(hostContext);
+            services.AddAtspmEFConfigRepositories();
+            services.AddAtspmEFEventLogRepositories();
+            services.AddSingleton<ISpeedPacketParser, SpeedPacketParser>();
+            services.AddSingleton<IDeviceMappingProvider, DeviceMappingProvider>();
+            services.AddSingleton<IEventPublisher<EventBatchEnvelope>, DatabaseEventPublisher>();
+            services.AddSingleton<ISpeedEventBatchProcessor, SpeedEventBatchProcessor>();
+            services.AddSingleton<IUdpDatagramReceiver>(serviceProvider =>
+            {
+                var configuration = serviceProvider.GetRequiredService<IOptions<SpeedListenerConfiguration>>().Value;
+                return new UdpDatagramReceiver(
+                    configuration.UdpPort,
+                    serviceProvider.GetRequiredService<TimeProvider>(),
+                    serviceProvider.GetRequiredService<Microsoft.Extensions.Logging.ILogger<UdpDatagramReceiver>>());
+            });
+            services.AddHostedService<SpeedListenerBackgroundService>();
+        });
+
+        using var host = builder.Build();
+        await host.RunAsync();
+    }
+
     /// <summary>
     /// Executes the generic host for a specific emitter service and configuration option.
     /// </summary>

@@ -25,8 +25,8 @@ Exit criteria: the ownership matrix, wire format, storage contract, timestamp co
 - [ ] Rename the draft configuration type. The file `Configuration/SpeedListenerConfiguration.cs` is already named correctly, but the class and its `[ConfigurationSection]` attribute are still `EventListenerConfiguration`; rename all three so the bound section is `SpeedListenerConfiguration`.
 - [ ] Add the settings and defaults from design section 7. Drop `ApiBaseUrl` and `ApiEndPoint` with the HTTP path; rename `threads` to `ArchiveParallelism`, keeping its default of 50.
 - [ ] Add startup validation for port, capacities, `BatchSize <= ChannelCapacity`, timeouts, and retry count.
-- [ ] Add a validation rule asserting `ShutdownFlushTimeout` covers at least one publish attempt cycle at the shutdown attempt budget. Do not treat this as making the drain complete; it only guarantees one batch can finish.
-- [ ] Configure `HostOptions.ShutdownTimeout` from `ShutdownFlushTimeout` plus headroom. The five-second default will otherwise kill the process mid-flush.
+- [x] Treat `ShutdownFlushTimeout` as the deadline for the entire channel drain and cancel processing when it expires.
+- [x] Configure `HostOptions.ShutdownTimeout` from `ShutdownFlushTimeout` plus headroom. The five-second default would otherwise kill the process mid-flush.
 - [ ] Split or refactor `HostBootstrapper` so emitter and listener commands register and validate only their own dependencies.
 - [ ] Implement `ListenerCommand` options and handler, preserving JSON and environment-variable configuration overrides.
 - [ ] Register listener dependencies with correct lifetimes, including `AddAtspmEFEventLogRepositories`. Do not migrate `AddEventPublishers` or the `IngestApi` HTTP client registration.
@@ -65,12 +65,12 @@ Exit criteria: one database read produces an immutable lookup, batches do not qu
 - [ ] Move `IEventPublisher<T>` as the publisher contract. Only the database implementation is migrated, but the interface is the seam the batch-processor tests use.
 - [ ] Move `DatabaseEventPublisher`, `EventBatchEnvelopeWorkflow`, and `ArchiveEnvelopeDataEvents` into this repository unchanged in behavior. Continue to consume `SaveArchivedEventLogs` and `Upsert` from the packages.
 - [ ] Do not migrate `HttpPublisher`, `KafkaPublisher`, `PubSubPublisher`, or the `IngestApi` HTTP client, and do not migrate `DangerousAcceptAnyServerCertificateValidator` with them.
-- [ ] Replace `DatabaseEventPublisher.PublishAsync(IReadOnlyList<...>, ...)`'s catch-log-and-return with the failure classification in design section 9. Retry is safe without further analysis because `Upsert` is idempotent over value-equal events.
-- [ ] Implement the classification in one place, keyed on the provider's error rather than exception type alone, since a single `DbUpdateException` covers every case: retry transient errors; drop one batch with error-level diagnostics for a constraint violation attributable to that batch's data; fail the service on a schema or model mismatch; fail the service when consecutive drops for one device cross a bounded threshold; fail the service when the retry budget is exhausted.
+- [x] Replace `DatabaseEventPublisher.PublishAsync(IReadOnlyList<...>, ...)`'s catch-log-and-return with bounded retry for transient failures and propagation of all terminal failures. Retry is safe because `Upsert` is idempotent over value-equal events.
+- [x] Never let a constraint, schema, or model mismatch drop batches and continue; the shared workflow cannot reliably isolate one poison event.
 - [ ] Do not let a schema or model mismatch drop batches and continue. Every batch fails identically, so the service would report healthy while discarding all ingest indefinitely, reintroducing the catch-log-and-return defect this phase removes.
 - [ ] Wire `ArchiveParallelism` to the workflow's archive step. Leave the save step at `MaxDegreeOfParallelism = 1`; raising it would let concurrent writers to the same device-hour lose events.
 - [ ] Apply `WriteTimeout` per attempt and pass the host cancellation token through, replacing the prototype's `CancellationToken.None`.
-- [ ] Add tests for envelope construction, workflow completion, transient retry, replayed-batch idempotency, single-batch constraint-violation drop, per-device repeated-violation escalation, schema-mismatch process failure, terminal failure, and cancellation.
+- [ ] Add tests for envelope construction, workflow completion, transient retry, replayed-batch idempotency, schema-mismatch process failure, terminal failure, and cancellation.
 
 Exit criteria: the migrated path produces the same compressed-event-log rows as the prototype for the same envelopes, and no failure path returns normally after losing data.
 

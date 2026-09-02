@@ -156,7 +156,7 @@ The pipeline shape is preserved. These specific behaviors are not, because each 
 
 **Host shutdown budget.** The generic host's `ShutdownTimeout` defaults to five seconds and will terminate the process before a longer final flush completes. Configured from `ShutdownFlushTimeout`.
 
-**Crash-looping on a rejected batch.** A batch the database will never accept because of its own contents must not fail the process, or it restarts, receives the same input, and dies again, taking down ingest for every sensor. Such a batch is dropped with diagnostics.
+**Terminal write failures.** A schema or constraint failure cannot be safely attributed to one event after envelopes enter the shared workflow. It therefore fails the service visibly rather than silently dropping a potentially valid batch. Invalid packets and mappings are rejected before persistence. A future poison-message policy requires a durable quarantine mechanism.
 
 This applies only to failures caused by one batch's data. A schema or model mismatch is systemic: every batch fails identically, so dropping each one and continuing would run a service that looks healthy while discarding all data indefinitely, which is the same silent loss this section exists to remove. Systemic failures must fail the process. Section 9 draws the line.
 
@@ -236,7 +236,7 @@ Duplicate identifiers, blank identifiers, and missing locations are configuratio
 
 `DatabaseEventPublisher` moves across as-is except for the swallowed-exception defect in section 5. It continues to construct an `EventBatchEnvelopeWorkflow`, send envelopes into it, complete the input, and await the step completions.
 
-Retry transient database failures with bounded exponential backoff and jitter. This is safe without further analysis because `Upsert` is idempotent over value-equal events. Do not retry constraint or schema violations.
+Retry transient database failures with bounded exponential backoff and jitter. This is safe because `Upsert` is idempotent over value-equal events. Do not retry constraint or schema violations; propagate them so the service fails visibly.
 
 The workflow's archive step takes a parallelism degree; its save step is hard-coded to `MaxDegreeOfParallelism = 1`. Do not raise save concurrency: concurrent writers to the same device-hour lose events, per section 4.1.
 
@@ -281,7 +281,7 @@ Changes from the prototype's configuration:
 
 Validate options at startup. Ports, positive capacities, `BatchSize <= ChannelCapacity`, timeouts, and retry limits must fail fast with actionable messages.
 
-`ShutdownFlushTimeout` must be at least one publish attempt cycle — `WriteTimeout` multiplied by the shutdown attempt budget, plus backoff — so that shutdown can complete at least one batch. Validate that.
+`ShutdownFlushTimeout` is the deadline for the entire channel drain, not one batch. Expiry cancels processing, reports the remaining queued count, and fails shutdown. The generic host timeout includes additional headroom so it can observe and report that result.
 
 That check is necessary but does not make the drain complete, and the configuration must not be read as if it did. A channel at `ChannelCapacity` holds twenty batches at the defaults, each of which may take a full attempt cycle; no plausible `ShutdownFlushTimeout` covers that, and raising it far enough would exceed what an orchestrator or service manager will wait before sending `SIGKILL`. `ShutdownFlushTimeout` is therefore a **bound on effort, not a guarantee of completion**, and section 6.1 specifies the best-effort drain it produces.
 
@@ -319,8 +319,7 @@ Refactor the current emitter-specific `HostBootstrapper.RunHostAsync<TService>` 
 | Mapping refresh fails after startup | Continue with last known mapping, log degraded state, retry later |
 | Channel full | Apply configured drop policy and log a rate-limited warning with a running dropped count |
 | Transient database failure | Bounded retry; preserve the current batch in memory |
-| Constraint violation attributable to one batch's data | Do not retry. Log location, device, and event count at error level, drop the batch, continue, and count the drop. |
-| Repeated constraint violations past a bounded threshold | Fail the service. A device whose every batch is rejected is a configuration fault, not a poison batch, and must not vanish silently. |
+| Constraint violation | Do not retry or discard silently. Log the batch identity and fail the service. |
 | Schema or model mismatch | Fail the service immediately. Do not drop and continue. |
 | Sustained database failure past the retry budget | Fail the service after logging batch identity and event count; do not silently discard |
 | Host cancellation | Stop receive, drain what the shutdown budget allows, report the residue |
@@ -406,12 +405,11 @@ After successful cutover, remove the EventListener executable and listener-speci
 - A replayed identical batch produces no duplicate stored events.
 - Size-, time-, and shutdown-triggered flushes are verified.
 - Unknown or malformed input cannot crash the receive loop or grow memory without bound.
-- A constraint violation drops one batch with a diagnostic log and does not terminate the process.
+- A constraint or schema violation is reported and terminates the service without being silently discarded.
 - Publish failures are retried only when transient and are never silently discarded.
 - Container shutdown completes within `ShutdownFlushTimeout`, with `HostOptions.ShutdownTimeout` configured to allow it.
 - Shutdown with a channel too full to drain in the budget reports the undrained event count at error level and exits non-successfully, rather than reporting success.
 - A schema or model mismatch fails the process rather than dropping batches and continuing.
-- A constraint violation attributable to one batch drops that batch and continues; repeated violations for one device past the threshold fail the service.
 - Measured peak load stays within the targets agreed in section 14.
 - Operational configuration and delivery limitations are documented in the README.
 

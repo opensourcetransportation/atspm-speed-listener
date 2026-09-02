@@ -156,7 +156,9 @@ The pipeline shape is preserved. These specific behaviors are not, because each 
 
 **Host shutdown budget.** The generic host's `ShutdownTimeout` defaults to five seconds and will terminate the process before a longer final flush completes. Configured from `ShutdownFlushTimeout`.
 
-**Crash-looping on a rejected batch.** A batch the database will never accept must not fail the process, or it restarts, receives the same input, and dies again, taking down ingest for every sensor. Constraint violations drop one batch with diagnostics; only systemic failure fails the service. See section 9.
+**Crash-looping on a rejected batch.** A batch the database will never accept because of its own contents must not fail the process, or it restarts, receives the same input, and dies again, taking down ingest for every sensor. Such a batch is dropped with diagnostics.
+
+This applies only to failures caused by one batch's data. A schema or model mismatch is systemic: every batch fails identically, so dropping each one and continuing would run a service that looks healthy while discarding all data indefinitely, which is the same silent loss this section exists to remove. Systemic failures must fail the process. Section 9 draws the line.
 
 ## 6. Proposed architecture
 
@@ -202,9 +204,11 @@ The background service will:
 2. start the UDP receive producer and batch-consumer tasks;
 3. await both tasks so faults are observed by the host;
 4. stop accepting packets when cancellation is requested;
-5. complete the channel and allow the consumer to drain;
-6. attempt a final publish within `ShutdownFlushTimeout`; and
+5. complete the channel and drain as much of it as `ShutdownFlushTimeout` allows, publishing batches in order under a reduced attempt budget;
+6. on expiry, stop draining, count the events still queued plus any in-flight batch, log that residue at error level, and exit non-successfully; and
 7. allow unexpected exceptions to fail the host, making container and service restart policies effective.
+
+Step 5 is explicitly best-effort. A full channel cannot be drained within any deployable shutdown budget, so the design does not promise a complete drain; it promises that whatever is lost is counted and reported rather than discarded silently. A shutdown that drops events must never report success. See section 7 for the budget and the worst-case loss figure.
 
 ### 6.2 UDP receiver
 
@@ -220,7 +224,7 @@ UDP has no delivery guarantee. The receiver processes quickly and writes parsed 
 
 A single consumer owns the batch, replacing the prototype's lock and fire-and-forget calls. It flushes when `BatchSize` events have accumulated, or when `FlushInterval` has elapsed since the first event in the current batch. It builds one `EventBatchEnvelope` per mapped device, exactly as `SendBatchAsync` does, and awaits the publisher.
 
-On shutdown, queued events are drained and the final partial batch is published within `ShutdownFlushTimeout`. A failed final publish is logged with an event count and causes a non-successful shutdown; the service must not claim successful persistence.
+On shutdown, the processor drains and publishes queued batches in order for as long as `ShutdownFlushTimeout` allows, using a reduced attempt budget so the fixed time covers as many batches as possible. When the budget expires it stops, counts the events still queued plus any in-flight batch, and logs that residue at error level. A failed or incomplete drain causes a non-successful shutdown; the service must never claim successful persistence for events it did not write.
 
 ### 6.5 Device mapping
 
@@ -275,7 +279,13 @@ Changes from the prototype's configuration:
 - `BatchSize` drops from 50,000 to 5,000, and `FlushInterval` is new. See section 5.
 - `ChannelCapacity`, `ShutdownFlushTimeout`, `DeviceMappingRefreshInterval`, `WriteTimeout`, and `MaxWriteAttempts` are new, supporting the corrections in section 5.
 
-Validate options at startup. Ports, positive capacities, `BatchSize <= ChannelCapacity`, timeouts, and retry limits must fail fast with actionable messages. `WriteTimeout` multiplied by `MaxWriteAttempts` plus backoff must fit inside `ShutdownFlushTimeout`, or the final flush cannot complete one retry cycle; either reduce the shutdown attempt budget or document shutdown writes as single-attempt.
+Validate options at startup. Ports, positive capacities, `BatchSize <= ChannelCapacity`, timeouts, and retry limits must fail fast with actionable messages.
+
+`ShutdownFlushTimeout` must be at least one publish attempt cycle — `WriteTimeout` multiplied by the shutdown attempt budget, plus backoff — so that shutdown can complete at least one batch. Validate that.
+
+That check is necessary but does not make the drain complete, and the configuration must not be read as if it did. A channel at `ChannelCapacity` holds twenty batches at the defaults, each of which may take a full attempt cycle; no plausible `ShutdownFlushTimeout` covers that, and raising it far enough would exceed what an orchestrator or service manager will wait before sending `SIGKILL`. `ShutdownFlushTimeout` is therefore a **bound on effort, not a guarantee of completion**, and section 6.1 specifies the best-effort drain it produces.
+
+Two consequences follow. Shutdown writes should use a reduced attempt budget, single-attempt by default, so the fixed budget covers as many batches as possible rather than exhausting itself retrying one. And the worst-case shutdown loss is `ChannelCapacity` events plus one in-flight batch; state that number in deployment documentation next to the outage-loss budget in section 9.
 
 `FlushInterval` is a trade between ingest latency and database write volume, because each flush upserts into the affected device-hour rows. Thirty seconds is a starting point to be re-derived from the load test in phase 7, not a tuned value.
 
@@ -309,14 +319,25 @@ Refactor the current emitter-specific `HostBootstrapper.RunHostAsync<TService>` 
 | Mapping refresh fails after startup | Continue with last known mapping, log degraded state, retry later |
 | Channel full | Apply configured drop policy and log a rate-limited warning with a running dropped count |
 | Transient database failure | Bounded retry; preserve the current batch in memory |
-| Constraint/schema violation | Do not retry. Log the batch's location, device, and event count, drop the batch, continue. Do not fail the process. |
+| Constraint violation attributable to one batch's data | Do not retry. Log location, device, and event count at error level, drop the batch, continue, and count the drop. |
+| Repeated constraint violations past a bounded threshold | Fail the service. A device whose every batch is rejected is a configuration fault, not a poison batch, and must not vanish silently. |
+| Schema or model mismatch | Fail the service immediately. Do not drop and continue. |
 | Sustained database failure past the retry budget | Fail the service after logging batch identity and event count; do not silently discard |
-| Host cancellation | Stop receive, drain channel, bounded final flush |
+| Host cancellation | Stop receive, drain what the shutdown budget allows, report the residue |
 | Unexpected receive/consumer fault | Propagate to host; do not run partially failed |
 
-The last three rows are deliberately distinct. A single batch the database will never accept must not crash-loop the service; only systemic failure fails the process.
+The three failure-classification rows are deliberately distinct, and the distinction is about blast radius rather than severity.
+
+A batch rejected because of its own contents affects one batch. Failing the process there would restart, re-receive the same input, and die again, taking down ingest for every healthy sensor. So it is dropped.
+
+A schema or model mismatch — a missing column, a type or `DataType` conversion failure, an EF model error — affects every batch equally. Dropping each one and continuing produces a service that reports itself healthy while discarding one hundred percent of ingest, indefinitely and silently. That is precisely the catch-log-and-return defect section 5 removes, reintroduced through the failure policy. Fail the process. The resulting crash-loop is the correct signal: this is a deployment or migration fault that needs a human, and a crash-loop is how it gets noticed.
+
+The middle row covers the case that resembles a poison batch but is really systemic at device scope, such as a `LocationIdentifier` exceeding the schema's ten characters. Every batch for that device will be rejected forever. Bound consecutive drops per device and fail the service once the threshold is crossed, so a permanently unwritable device surfaces instead of disappearing.
+
+Implementations must classify by the provider's error rather than by exception type alone, since a single `DbUpdateException` covers all of these. Record the classification rule in one place and test each branch.
 
 During a database outage the retry loop blocks the single consumer, so the channel fills and begins shedding new events under the drop policy. This is intended, but it means an outage causes loss at the head of the pipeline within roughly `ChannelCapacity` divided by arrival rate seconds. State that budget in deployment documentation alongside the retry configuration.
+
 
 The v1 service is memory-backed. A process crash, machine loss, or sustained outage beyond retry limits can lose UDP events. That limitation must appear in deployment documentation. A durable queue or spool is a separate reliability enhancement.
 
@@ -387,7 +408,10 @@ After successful cutover, remove the EventListener executable and listener-speci
 - Unknown or malformed input cannot crash the receive loop or grow memory without bound.
 - A constraint violation drops one batch with a diagnostic log and does not terminate the process.
 - Publish failures are retried only when transient and are never silently discarded.
-- Container shutdown drains or reports failure within `ShutdownFlushTimeout`, with `HostOptions.ShutdownTimeout` configured to allow it.
+- Container shutdown completes within `ShutdownFlushTimeout`, with `HostOptions.ShutdownTimeout` configured to allow it.
+- Shutdown with a channel too full to drain in the budget reports the undrained event count at error level and exits non-successfully, rather than reporting success.
+- A schema or model mismatch fails the process rather than dropping batches and continuing.
+- A constraint violation attributable to one batch drops that batch and continues; repeated violations for one device past the threshold fail the service.
 - Measured peak load stays within the targets agreed in section 14.
 - Operational configuration and delivery limitations are documented in the README.
 

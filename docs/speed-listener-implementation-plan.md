@@ -25,7 +25,7 @@ Exit criteria: the ownership matrix, wire format, storage contract, timestamp co
 - [ ] Rename the draft configuration type. The file `Configuration/SpeedListenerConfiguration.cs` is already named correctly, but the class and its `[ConfigurationSection]` attribute are still `EventListenerConfiguration`; rename all three so the bound section is `SpeedListenerConfiguration`.
 - [ ] Add the settings and defaults from design section 7. Drop `ApiBaseUrl` and `ApiEndPoint` with the HTTP path; rename `threads` to `ArchiveParallelism`, keeping its default of 50.
 - [ ] Add startup validation for port, capacities, `BatchSize <= ChannelCapacity`, timeouts, and retry count.
-- [ ] Add a validation rule asserting `WriteTimeout` times `MaxWriteAttempts` plus backoff fits within `ShutdownFlushTimeout`, or implement and document single-attempt shutdown writes.
+- [ ] Add a validation rule asserting `ShutdownFlushTimeout` covers at least one publish attempt cycle at the shutdown attempt budget. Do not treat this as making the drain complete; it only guarantees one batch can finish.
 - [ ] Configure `HostOptions.ShutdownTimeout` from `ShutdownFlushTimeout` plus headroom. The five-second default will otherwise kill the process mid-flush.
 - [ ] Split or refactor `HostBootstrapper` so emitter and listener commands register and validate only their own dependencies.
 - [ ] Implement `ListenerCommand` options and handler, preserving JSON and environment-variable configuration overrides.
@@ -65,10 +65,12 @@ Exit criteria: one database read produces an immutable lookup, batches do not qu
 - [ ] Move `IEventPublisher<T>` as the publisher contract. Only the database implementation is migrated, but the interface is the seam the batch-processor tests use.
 - [ ] Move `DatabaseEventPublisher`, `EventBatchEnvelopeWorkflow`, and `ArchiveEnvelopeDataEvents` into this repository unchanged in behavior. Continue to consume `SaveArchivedEventLogs` and `Upsert` from the packages.
 - [ ] Do not migrate `HttpPublisher`, `KafkaPublisher`, `PubSubPublisher`, or the `IngestApi` HTTP client, and do not migrate `DangerousAcceptAnyServerCertificateValidator` with them.
-- [ ] Replace `DatabaseEventPublisher.PublishAsync(IReadOnlyList<...>, ...)`'s catch-log-and-return with failure classification: retry transient database errors with bounded backoff and jitter, drop with diagnostics on constraint or schema violations, propagate terminal failure. Retry is safe without further analysis because `Upsert` is idempotent over value-equal events.
+- [ ] Replace `DatabaseEventPublisher.PublishAsync(IReadOnlyList<...>, ...)`'s catch-log-and-return with the failure classification in design section 9. Retry is safe without further analysis because `Upsert` is idempotent over value-equal events.
+- [ ] Implement the classification in one place, keyed on the provider's error rather than exception type alone, since a single `DbUpdateException` covers every case: retry transient errors; drop one batch with error-level diagnostics for a constraint violation attributable to that batch's data; fail the service on a schema or model mismatch; fail the service when consecutive drops for one device cross a bounded threshold; fail the service when the retry budget is exhausted.
+- [ ] Do not let a schema or model mismatch drop batches and continue. Every batch fails identically, so the service would report healthy while discarding all ingest indefinitely, reintroducing the catch-log-and-return defect this phase removes.
 - [ ] Wire `ArchiveParallelism` to the workflow's archive step. Leave the save step at `MaxDegreeOfParallelism = 1`; raising it would let concurrent writers to the same device-hour lose events.
 - [ ] Apply `WriteTimeout` per attempt and pass the host cancellation token through, replacing the prototype's `CancellationToken.None`.
-- [ ] Add tests for envelope construction, workflow completion, transient retry, replayed-batch idempotency, constraint-violation drop, terminal failure, and cancellation.
+- [ ] Add tests for envelope construction, workflow completion, transient retry, replayed-batch idempotency, single-batch constraint-violation drop, per-device repeated-violation escalation, schema-mismatch process failure, terminal failure, and cancellation.
 
 Exit criteria: the migrated path produces the same compressed-event-log rows as the prototype for the same envelopes, and no failure path returns normally after losing data.
 
@@ -81,7 +83,8 @@ Exit criteria: the migrated path produces the same compressed-event-log rows as 
 - [ ] Build one envelope per mapped device from the cached lookup, preserving the prototype's grouping and `Start`/`End` from group minimum and maximum timestamps.
 - [ ] Rate-limit unknown-sensor and channel-drop warnings, and maintain in-process counters for the periodic summary log.
 - [ ] Retain a failed in-memory batch until the retry policy is exhausted; propagate terminal failure.
-- [ ] Implement channel completion, drain, and bounded final flush.
+- [ ] Implement channel completion and a best-effort drain bounded by `ShutdownFlushTimeout`, publishing queued batches in order under a reduced attempt budget so the fixed time covers as many batches as possible.
+- [ ] On budget expiry, stop draining, count the events still queued plus any in-flight batch, log that residue at error level, and exit non-successfully. A full channel cannot be drained in any deployable budget, so shutdown must report what it lost rather than claim success.
 - [ ] Add deterministic tests using a fake clock and completion signals, covering flush by size, flush by interval, flush on shutdown, and multi-sensor grouping.
 
 Exit criteria: there are no unobserved publish tasks, memory is bounded, partial batches flush on time and on shutdown, and terminal publish failures fail the pipeline.
@@ -93,7 +96,7 @@ Exit criteria: there are no unobserved publish tasks, memory is bounded, partial
 - [ ] Ensure either unexpected task failure cancels the other side and propagates to the generic host. This is the liveness mechanism, since no health endpoint exists.
 - [ ] Implement orderly cancellation: stop receive, complete channel, drain, final flush, exit.
 - [ ] Add structured lifecycle logs, including a single startup-complete log emitted only after UDP binding and initial mapping load succeed, and the periodic summary log from design section 10.
-- [ ] Add hosted-service tests for startup, normal cancellation, producer failure, consumer failure, and shutdown timeout.
+- [ ] Add hosted-service tests for startup, normal cancellation, producer failure, consumer failure, shutdown timeout, and shutdown with a channel too full to drain in the budget, asserting the undrained count is reported and the exit is non-successful.
 
 Exit criteria: the service runs continuously under normal traffic, fails visibly on pipeline faults, and exits within the configured shutdown bound.
 
@@ -105,7 +108,7 @@ Exit criteria: the service runs continuously under normal traffic, fails visibly
 - [ ] Verify two flushes into the same device-hour accumulate rather than overwrite, and that a replayed batch adds no duplicate events.
 - [ ] Verify against real sanitized captures if phase 0 could not obtain them earlier. This is the gate for declaring wire compatibility.
 - [ ] Add listener settings and environment-variable examples to `appsettings.json` and the README without committing secrets.
-- [ ] Update the Dockerfile and image metadata; document UDP port exposure, database dependencies, the absence of a health endpoint and what to monitor instead, and `SIGTERM` behavior.
+- [ ] Update the Dockerfile and image metadata; document UDP port exposure, database dependencies, the absence of a health endpoint and what to monitor instead, `SIGTERM` behavior, and the two loss budgets: worst-case shutdown loss of `ChannelCapacity` events plus one in-flight batch, and outage loss beginning after roughly `ChannelCapacity` divided by arrival rate seconds.
 - [ ] Add CI jobs for build, unit tests, integration tests, formatting, and container build.
 - [ ] Run a sustained load test at expected peak packet rate. Measure database write volume alongside CPU and memory, and tune `FlushInterval`, `BatchSize`, and `ChannelCapacity` from that evidence. Each flush upserts into the affected device-hour rows, so `FlushInterval` trades ingest latency against write volume; its default is a starting point, not a tuned value.
 - [ ] Run dependency, license, and vulnerability checks.

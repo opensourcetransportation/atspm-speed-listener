@@ -112,7 +112,7 @@ public class SpeedEmitterServiceTests
         Assert.Equal(30, result[8]);
         Assert.Equal(48, result[9]);
         var extractedId = Encoding.ASCII.GetString(result, 10, 6);
-        Assert.Equal(6, extractedId.Length);
+        Assert.Equal("      ", extractedId);
     }
 
     /// <summary>
@@ -180,12 +180,18 @@ public class SpeedEmitterServiceTests
 
         _deviceRepositoryMock.Setup(r => r.GetList()).Returns(devices.AsQueryable());
 
+        using var listener = new UdpClient(0);
+        _config.ListenerPort = ((System.Net.IPEndPoint)listener.Client.LocalEndPoint!).Port;
         var service = new SpeedEmitterService(_options, _deviceRepositoryMock.Object, _loggerMock.Object);
 
-        using var listener = new UdpClient(1088);
-
         var result = await service.EmitSampleAsync(CancellationToken.None);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var received = await listener.ReceiveAsync(timeout.Token);
 
         Assert.True(result);
+        Assert.Equal(16, received.Buffer.Length);
+        Assert.InRange(received.Buffer[8], 20, 79);
+        Assert.Equal((byte)(received.Buffer[8] * 1.609), received.Buffer[9]);
+        Assert.Equal("SPD100", Encoding.ASCII.GetString(received.Buffer, 10, 6));
     }
 }

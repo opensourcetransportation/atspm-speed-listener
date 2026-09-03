@@ -3,75 +3,58 @@ using SpeedListener.Publishing;
 using SpeedListener.WorkflowSteps;
 using System.Threading.Tasks.Dataflow;
 using Utah.Udot.Atspm.Data.Models;
-using Utah.Udot.Atspm.Data.Models.EventLogModels;
-using Utah.Udot.ATSPM.Infrastructure.WorkflowSteps;
-using Utah.Udot.NetStandardToolkit.Workflows;
+using Utah.Udot.Atspm.Extensions;
+using Utah.Udot.Atspm.Repositories.EventLogRepositories;
 
 namespace SpeedListener.Workflows;
 
-/// <summary>Archives event envelopes and saves the resulting compressed event logs.</summary>
-public sealed class EventBatchEnvelopeWorkflow(
-    IServiceScopeFactory scopeFactory,
-    int parallelProcesses = 50,
-    CancellationToken cancellationToken = default)
-    : WorkflowBase<EventBatchEnvelope, CompressedEventLogBase>
+/// <summary>
+/// TPL Dataflow workflow that archives envelopes in parallel and persists compressed logs through one writer.
+/// </summary>
+public sealed class EventBatchEnvelopeWorkflow
 {
-    private bool _initialized;
-    private readonly object _initializationLock = new();
-
-    /// <summary>Gets the envelope archive step.</summary>
-    public ArchiveEnvelopeDataEvents Archive { get; private set; } = default!;
-    /// <summary>Gets the packaged compressed-log persistence step.</summary>
-    public SaveArchivedEventLogs Save { get; private set; } = default!;
-
-    /// <inheritdoc/>
-    public override Task Initialize()
+    /// <summary>Creates the local workflow without requiring changes to the packaged ATSPM workflow types.</summary>
+    public EventBatchEnvelopeWorkflow(
+        IServiceScopeFactory scopeFactory,
+        int parallelProcesses = 50,
+        CancellationToken cancellationToken = default)
     {
-        lock (_initializationLock)
-        {
-            if (_initialized) return Task.CompletedTask;
-            Steps = [];
-            var options = new DataflowBlockOptions { CancellationToken = cancellationToken };
-            // This broadcast is safe only while the sole linked target accepts immediately. Do not add a bounded
-            // target without replacing it: BroadcastBlock may overwrite a value that has not been accepted.
-            Input = new BroadcastBlock<EventBatchEnvelope>(value => value, options);
-            Output = new BufferBlock<CompressedEventLogBase>(options);
-            InstantiateSteps();
-            Steps.Add(Input);
-            AddStepsToTracker();
-            LinkSteps();
-            _initialized = true;
-            return Task.CompletedTask;
-        }
-    }
+        Archive = new TransformManyBlock<EventBatchEnvelope, CompressedEventLogBase>(
+            envelope => ArchiveEnvelopeDataEvents.Archive(envelope, cancellationToken),
+            new ExecutionDataflowBlockOptions
+            {
+                MaxDegreeOfParallelism = parallelProcesses,
+                CancellationToken = cancellationToken
+            });
 
-    /// <inheritdoc/>
-    protected override void InstantiateSteps()
-    {
-        Archive = new ArchiveEnvelopeDataEvents(new ExecutionDataflowBlockOptions
+        Save = new ActionBlock<CompressedEventLogBase>(async compressed =>
         {
-            MaxDegreeOfParallelism = parallelProcesses,
-            CancellationToken = cancellationToken
-        });
-        Save = new SaveArchivedEventLogs(scopeFactory, new ExecutionDataflowBlockOptions
+            await using var scope = scopeFactory.CreateAsyncScope();
+            var repository = scope.ServiceProvider.GetRequiredService<IEventLogRepository>();
+            await repository.Upsert(compressed);
+        }, new ExecutionDataflowBlockOptions
         {
             MaxDegreeOfParallelism = 1,
+            EnsureOrdered = true,
             CancellationToken = cancellationToken
         });
-    }
 
-    /// <inheritdoc/>
-    protected override void AddStepsToTracker()
-    {
-        Steps.Add(Archive);
-        Steps.Add(Save);
-    }
-
-    /// <inheritdoc/>
-    protected override void LinkSteps()
-    {
-        Input.LinkTo(Archive, new DataflowLinkOptions { PropagateCompletion = true });
         Archive.LinkTo(Save, new DataflowLinkOptions { PropagateCompletion = true });
-        Save.LinkTo(Output, new DataflowLinkOptions { PropagateCompletion = true });
     }
+
+    /// <summary>Gets the parallel envelope archive block.</summary>
+    public TransformManyBlock<EventBatchEnvelope, CompressedEventLogBase> Archive { get; }
+
+    /// <summary>Gets the single-writer persistence block.</summary>
+    public ActionBlock<CompressedEventLogBase> Save { get; }
+
+    /// <summary>Sends an envelope into the workflow.</summary>
+    public Task<bool> SendAsync(EventBatchEnvelope envelope, CancellationToken cancellationToken = default) =>
+        Archive.SendAsync(envelope, cancellationToken);
+
+    /// <summary>Signals that no additional envelopes will be sent.</summary>
+    public void Complete() => Archive.Complete();
+
+    /// <summary>Completes successfully only after every accepted envelope has been persisted.</summary>
+    public Task Completion => Save.Completion;
 }

@@ -63,7 +63,7 @@ Exit criteria: one database read produces an immutable lookup, batches do not qu
 
 - [ ] Move `EventBatchEnvelope` into this repository as a local type, preserving its field shape: `LocationIdentifier`, `DeviceId`, `DataType`, `Start`, `End`, `Items`.
 - [ ] Move `IEventPublisher<T>` as the publisher contract. Only the database implementation is migrated, but the interface is the seam the batch-processor tests use.
-- [ ] Move `DatabaseEventPublisher`, `EventBatchEnvelopeWorkflow`, and `ArchiveEnvelopeDataEvents` into this repository unchanged in behavior. Continue to consume `SaveArchivedEventLogs` and `Upsert` from the packages.
+- [x] Move `DatabaseEventPublisher`, `EventBatchEnvelopeWorkflow`, and `ArchiveEnvelopeDataEvents` into this repository. Keep the TPL Dataflow archive/save pipeline local and consume packaged `Upsert`; the local single-writer save block makes repository faults observable without changing the ATSPM package.
 - [ ] Do not migrate `HttpPublisher`, `KafkaPublisher`, `PubSubPublisher`, or the `IngestApi` HTTP client, and do not migrate `DangerousAcceptAnyServerCertificateValidator` with them.
 - [x] Replace `DatabaseEventPublisher.PublishAsync(IReadOnlyList<...>, ...)`'s catch-log-and-return with bounded retry for transient failures and propagation of all terminal failures. Retry is safe because `Upsert` is idempotent over value-equal events.
 - [x] Classify provider errors centrally. Isolate batch-data constraint failures to device envelopes and escalate repeated drops; fail immediately on schema or model mismatch.
@@ -125,7 +125,7 @@ Exit criteria: CI is green, the container passes end-to-end and shutdown tests, 
 - [ ] Monitor the agreed soak period and capture operational baselines, including database write volume.
 - [ ] Confirm no other `udot-atspm` consumer depends on `HttpPublisher`, `KafkaPublisher`, `PubSubPublisher`, `EventBatchEnvelope`, or `IEventPublisher<T>` before removing them.
 - [ ] In a separate `udot-atspm` change, remove `EventListener`, `EventListenerConfiguration`, `IUdpReceiver`, `UdpReceiver`, `RawSpeedPacketParser`, `SpeedBatchListenerBase`, `UDPSpeedBatchListener`, `EventBatchEnvelope`, `IEventPublisher<T>`, `EventBatchEnvelopeWorkflow`, `ArchiveEnvelopeDataEvents`, `DatabaseEventPublisher`, and the HTTP, Kafka, and Pub/Sub publishers from shared libraries.
-- [ ] Retain ATSPM domain models, repository contracts, EF implementations, database providers, `SaveArchivedEventLogs`, and registration extensions in the ATSPM NuGet packages.
+- [x] Retain ATSPM domain models, repository contracts, EF implementations, database providers, `Upsert`, and registration extensions in the ATSPM NuGet packages. Keep the listener-specific TPL workflow local.
 
 Exit criteria: the dedicated service is the sole production listener, service-level indicators remain healthy through the soak period, rollback is documented, and monolith cleanup is reviewed independently.
 

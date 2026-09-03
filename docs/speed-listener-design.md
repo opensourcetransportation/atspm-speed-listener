@@ -49,7 +49,7 @@ PR #217 contains the working prototype spread across the monolith:
 | Database publisher | `Atspm/Infrastructure/Messaging/Database/DatabaseEventPublisher.cs` | Move |
 | Archive/save workflow | `Atspm/Infrastructure/Workflows/EventBatchEnvelopeWorkflow.cs` | Move |
 | Envelope-to-compressed-log step | `Atspm/Infrastructure/WorkflowSteps/ArchiveEnvelopeDataEvents.cs` | Move |
-| Compressed-log persistence step | `Atspm/Infrastructure/WorkflowSteps/SaveArchivedEventLogs.cs` | Consume from package |
+| Compressed-log persistence step | `Atspm/Infrastructure/WorkflowSteps/SaveArchivedEventLogs.cs` | Move an equivalent local TPL block so persistence faults propagate |
 | HTTP publisher | `Atspm/Infrastructure/Messaging/Http/HttpPublisher.cs` | Drop |
 | Kafka publisher | `Atspm/Infrastructure/Messaging/Kafka/KafkaPublisher.cs` | Drop |
 | Pub/Sub publisher | `Atspm/Infrastructure/Messaging/PubSub/PubSubPublisher.cs` | Drop |
@@ -67,10 +67,9 @@ Confirmed present in the pinned 5.3.1 packages and consumed rather than copied:
 | `IDeviceRepository` | `Utah.Udot.Atspm` |
 | `IEventLogRepository`, `ISpeedEventLogRepository` | `Utah.Udot.Atspm` |
 | `IEventLogRepositoryExtensions.Upsert<T>` | `Utah.Udot.Atspm` |
-| `SaveArchivedEventLogs` | `Utah.Udot.Atspm.Infrastructure` |
 | `AddAtspmDbContext`, `AddAtspmEFConfigRepositories`, `AddAtspmEFEventLogRepositories` | `Utah.Udot.Atspm.Infrastructure` |
 
-`SaveArchivedEventLogs` and `Upsert` being published is what allows the migration to keep the PR's write path without copying it: only the envelope, the workflow, the archive step, and the database publisher need to move.
+The packaged `Upsert` extension preserves ATSPM's idempotent repository behavior. The save block itself is local because the packaged workflow abstraction does not expose persistence faults through its completion task; the listener must observe those faults to apply the failure policy. This does not require an ATSPM package change.
 
 Confirmed **absent** from the packages and therefore listener-owned: `EventBatchEnvelope`, `IEventPublisher<T>`, `EventBatchEnvelopeWorkflow`, `ArchiveEnvelopeDataEvents`, `DatabaseEventPublisher`, `IUdpReceiver`, `UdpReceiver`, `RawSpeedPacketParser`, `SpeedBatchListenerBase`, `UDPSpeedBatchListener`, `EventListenerConfiguration`.
 
@@ -189,7 +188,7 @@ EventBatchEnvelopeWorkflow
    |                 |
    |   ArchiveEnvelopeDataEvents --> hourly CompressedEventLogs<SpeedEvent>
    v
-SaveArchivedEventLogs -> IEventLogRepository.Upsert -> event-log database
+local single-writer ActionBlock -> IEventLogRepository.Upsert -> event-log database
 ```
 
 Everything from `EventBatchEnvelope` downward is the prototype's path, unchanged. `SpeedListenerBackgroundService` composes the pipeline and owns its lifecycle. Transport, parsing, mapping, and publishing remain separate services so each can be tested without a live socket or database.

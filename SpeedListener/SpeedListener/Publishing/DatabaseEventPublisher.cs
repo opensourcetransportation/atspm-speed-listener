@@ -3,10 +3,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using SpeedListener.Configuration;
 using SpeedListener.Services;
-using SpeedListener.WorkflowSteps;
-using Utah.Udot.Atspm.Repositories.EventLogRepositories;
-using Utah.Udot.Atspm.Extensions;
-using Utah.Udot.NetStandardToolkit.Workflows;
+using SpeedListener.Workflows;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 
@@ -73,25 +70,13 @@ public sealed class DatabaseEventPublisher(
             var started = Stopwatch.GetTimestamp();
             try
             {
-                var archived = new ConcurrentBag<Utah.Udot.Atspm.Data.Models.CompressedEventLogBase>();
-                await Parallel.ForEachAsync(batch, new ParallelOptions
-                {
-                    MaxDegreeOfParallelism = parallelism,
-                    CancellationToken = timeout.Token
-                }, (envelope, token) =>
-                {
-                    foreach (var compressed in ArchiveEnvelopeDataEvents.Archive(envelope, token))
-                        archived.Add(compressed);
-                    return ValueTask.CompletedTask;
-                });
+                var workflow = new EventBatchEnvelopeWorkflow(scopeFactory, parallelism, timeout.Token);
+                foreach (var envelope in batch)
+                    if (!await workflow.SendAsync(envelope, timeout.Token))
+                        throw new InvalidOperationException("The TPL workflow declined a speed-event envelope.");
 
-                await using var scope = scopeFactory.CreateAsyncScope();
-                var repository = scope.ServiceProvider.GetRequiredService<IEventLogRepository>();
-                foreach (var compressed in archived.OrderBy(item => item.DeviceId).ThenBy(item => item.Start))
-                {
-                    timeout.Token.ThrowIfCancellationRequested();
-                    await repository.Upsert(compressed);
-                }
+                workflow.Complete();
+                await workflow.Completion;
                 var latency = Stopwatch.GetElapsedTime(started);
                 metrics.RecordPublished(batch.Count, latency);
                 logger.LogInformation("Archived {Count} speed-event envelopes in {ElapsedMilliseconds} ms",

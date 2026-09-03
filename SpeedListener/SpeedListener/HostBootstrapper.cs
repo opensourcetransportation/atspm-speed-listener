@@ -15,9 +15,14 @@
 // limitations under the License.
 #endregion
 
+using Google.Cloud.Diagnostics.Common;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using System.Diagnostics;
+using System.Runtime.Versioning;
+using System.Security;
 using SpeedListener.BackgroundServices;
 using SpeedListener.Configuration;
 using SpeedListener.Parsing;
@@ -37,7 +42,15 @@ public static class HostBootstrapper
     public static async Task RunListenerHostAsync(Action<SpeedListenerConfiguration> configureAction)
     {
         AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
-        var builder = Host.CreateDefaultBuilder();
+        var builder = Host.CreateDefaultBuilder()
+            .ApplyVolumeConfiguration()
+            .ConfigureLogging((hostContext, logging) =>
+            {
+                if (OperatingSystem.IsWindows())
+                    TryConfigureWindowsEventLog(logging);
+
+                logging.AddGoogle(hostContext);
+            });
         builder.ConfigureServices((hostContext, services) =>
         {
             services.AddOptions<SpeedListenerConfiguration>()
@@ -99,6 +112,27 @@ public static class HostBootstrapper
         var shutdownWriteBudget = TimeSpan.FromTicks(
             configuration.WriteTimeout.Ticks * configuration.ShutdownMaxWriteAttempts);
         return configuration.ShutdownFlushTimeout > shutdownWriteBudget;
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static void TryConfigureWindowsEventLog(ILoggingBuilder logging)
+    {
+        const string logName = "Atspm";
+        var sourceName = AppDomain.CurrentDomain.FriendlyName;
+        try
+        {
+            if (!EventLog.SourceExists(sourceName))
+                EventLog.CreateEventSource(sourceName, logName);
+            logging.AddEventLog(configuration =>
+            {
+                configuration.SourceName = sourceName;
+                configuration.LogName = logName;
+            });
+        }
+        catch (Exception exception) when (exception is SecurityException or UnauthorizedAccessException)
+        {
+            // Event-source discovery/registration requires elevation. Other configured providers remain active.
+        }
     }
 
     /// <summary>

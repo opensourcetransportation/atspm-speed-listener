@@ -1,6 +1,7 @@
 using SpeedListener.Receivers;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using SpeedListener.LogMessages;
 using System.Globalization;
 using System.Text;
 using Utah.Udot.Atspm.Data.Models.EventLogModels;
@@ -10,7 +11,7 @@ namespace SpeedListener.Parsing;
 /// <summary>Parses the legacy speed sensor packet format used by PR #217.</summary>
 public sealed class SpeedPacketParser(ILogger<SpeedPacketParser>? logger = null) : ISpeedPacketParser
 {
-    private readonly ILogger<SpeedPacketParser> _logger = logger ?? NullLogger<SpeedPacketParser>.Instance;
+    private readonly SpeedListenerLogMessages _log = new(logger ?? NullLogger<SpeedPacketParser>.Instance);
 
     /// <inheritdoc/>
     public SpeedPacketParseResult Parse(UdpDatagram datagram)
@@ -19,7 +20,7 @@ public sealed class SpeedPacketParser(ILogger<SpeedPacketParser>? logger = null)
         if (data.Length < 16)
             return SpeedPacketParseResult.Failure($"Expected at least 16 bytes but received {data.Length}.");
 
-        _logger.LogDebug("Observed speed-packet header byte {HeaderByte}", data[7]);
+        _log.HeaderObserved(data[7]);
 
         var detectorId = Encoding.ASCII.GetString(data, 10, 6).Trim();
         if (string.IsNullOrWhiteSpace(detectorId))

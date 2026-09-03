@@ -352,6 +352,8 @@ The v1 service is memory-backed. A process crash, machine loss, or sustained out
 
 Observability is **structured logging only**. No metrics instrumentation, exporter, or metrics dependency is in scope. Counters below are in-process values included in log messages, not published metrics.
 
+The host follows ATSPM EventLogUtility conventions: apply volume configuration, register Google Cloud logging, and use the `Atspm` Windows Event Log when the process can access or register its event source. A non-elevated Windows development process skips that sink rather than failing listener startup. Listener-owned messages use source-generated `LoggerMessage` methods with stable event IDs.
+
 Use structured logs with event IDs for startup, bind success/failure, packet rejection, unknown sensor, mapping refresh, batch flush, publish retry/failure, and shutdown result. Never log credentials, connection strings, or full raw packets.
 
 Emit a periodic summary log carrying at minimum datagrams received, packets parsed and rejected, unknown-sensor events, channel depth and dropped events, batches and envelopes published, publish latency, retries and failures, and mapping age and refresh failures. The shadow-mode comparison in section 12 depends on these, so the summary must be machine-parseable.

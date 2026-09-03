@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using SpeedListener.Configuration;
+using SpeedListener.LogMessages;
 using Utah.Udot.Atspm.Data;
 using Utah.Udot.Atspm.Data.Enums;
 
@@ -17,6 +18,7 @@ public sealed class DeviceMappingProvider(
     ILogger<DeviceMappingProvider> logger) : IDeviceMappingProvider
 {
     private readonly SemaphoreSlim _refreshLock = new(1, 1);
+    private readonly SpeedListenerLogMessages _log = new(logger);
     private IReadOnlyDictionary<string, DeviceMapping>? _mappings;
     private DateTimeOffset _loadedAt;
 
@@ -72,18 +74,14 @@ public sealed class DeviceMappingProvider(
             _mappings = updated;
             _loadedAt = timeProvider.GetUtcNow();
             metrics.RecordMappingRefresh();
-            logger.LogInformation(
-                "Loaded {Count} speed-sensor device mappings; skipped {InvalidCount} invalid and {DuplicateCount} duplicate rows",
-                updated.Count, invalidCount, duplicateCount);
+            _log.MappingsLoaded(updated.Count, invalidCount, duplicateCount);
             if (invalidCount > 0 || duplicateCount > 0)
-                logger.LogWarning(
-                    "Speed-sensor mapping validation found {InvalidCount} invalid and {DuplicateCount} duplicate rows; valid sensors remain active",
-                    invalidCount, duplicateCount);
+                _log.MappingValidationWarning(invalidCount, duplicateCount);
         }
         catch (Exception ex) when (_mappings is not null)
         {
             metrics.RecordMappingRefreshFailure();
-            logger.LogWarning(ex, "Device mapping refresh failed; continuing with the last successful mapping");
+            _log.MappingRefreshFailed(ex);
         }
         catch
         {

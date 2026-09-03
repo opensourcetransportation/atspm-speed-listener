@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using SpeedListener.Configuration;
+using SpeedListener.LogMessages;
 using SpeedListener.Services;
 using SpeedListener.Workflows;
 using System.Collections.Concurrent;
@@ -17,6 +18,7 @@ public sealed class DatabaseEventPublisher(
     ILogger<DatabaseEventPublisher> logger) : IEventPublisher<EventBatchEnvelope>
 {
     private readonly ConcurrentDictionary<int, int> _consecutiveDeviceDrops = new();
+    private readonly SpeedListenerLogMessages _log = new(logger);
 
     /// <inheritdoc/>
     public Task PublishAsync(EventBatchEnvelope message, CancellationToken cancellationToken = default) =>
@@ -42,9 +44,7 @@ public sealed class DatabaseEventPublisher(
                 return;
             }
 
-            logger.LogWarning(ex,
-                "Database rejected a batch of {EnvelopeCount} envelopes; isolating the device-attributable failure",
-                batch.Count);
+            _log.BatchRejected(batch.Count, ex);
             foreach (var envelope in batch)
             {
                 try
@@ -73,8 +73,7 @@ public sealed class DatabaseEventPublisher(
                 await ExecuteWorkflowAsync(batch, parallelism, timeout.Token);
                 var latency = Stopwatch.GetElapsedTime(started);
                 metrics.RecordPublished(batch.Count, latency);
-                logger.LogInformation("Archived {Count} speed-event envelopes in {ElapsedMilliseconds} ms",
-                    batch.Count, latency.TotalMilliseconds);
+                _log.EnvelopesArchived(batch.Count, latency.TotalMilliseconds);
                 return;
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -85,16 +84,13 @@ public sealed class DatabaseEventPublisher(
             {
                 metrics.RecordRetry();
                 var delay = TimeSpan.FromMilliseconds(200 * Math.Pow(2, attempt - 1) + Random.Shared.Next(0, 100));
-                logger.LogWarning(ex, "Transient database write failure on attempt {Attempt}; retrying in {Delay}",
-                    attempt, delay);
+                _log.DatabaseWriteRetry(attempt, delay, ex);
                 await Task.Delay(delay, cancellationToken);
             }
             catch (Exception ex)
             {
                 metrics.RecordPublishFailure();
-                logger.LogError(ex,
-                    "Database write failed with classification {Classification} for {Count} envelopes on attempt {Attempt}",
-                    ClassifyAttempt(ex, timeout, cancellationToken), batch.Count, attempt);
+                _log.DatabaseWriteFailed(ClassifyAttempt(ex, timeout, cancellationToken), batch.Count, attempt, ex);
                 throw;
             }
         }
@@ -142,9 +138,7 @@ public sealed class DatabaseEventPublisher(
     {
         metrics.RecordPoisonBatch();
         var drops = _consecutiveDeviceDrops.AddOrUpdate(envelope.DeviceId, 1, static (_, count) => count + 1);
-        logger.LogError(exception,
-            "Dropped poison speed-event envelope for device {DeviceId}, location {LocationIdentifier}; consecutive drops {ConsecutiveDrops}",
-            envelope.DeviceId, envelope.LocationIdentifier, drops);
+        _log.PoisonEnvelopeDropped(envelope.DeviceId, envelope.LocationIdentifier, drops, exception);
 
         if (drops >= options.Value.PoisonDeviceFailureThreshold)
             throw new PoisonDeviceException(envelope.DeviceId, drops, exception);

@@ -54,6 +54,11 @@ ATSPM `DatabaseConfiguration` settings configure the configuration and event-log
 databases through the NuGet-provided registration extensions. Do not commit
 connection strings or credentials.
 
+Operational logging follows the ATSPM EventLogUtility host pattern: console logging,
+Google Cloud logging, ATSPM volume configuration, and the `Atspm` Windows Event Log
+when event-source registration is available. Listener messages use source-generated
+`LoggerMessage` methods with stable event IDs.
+
 ## Processing behavior
 
 The service reads the legacy packet layout used by the ATSPM Speed Listener pull

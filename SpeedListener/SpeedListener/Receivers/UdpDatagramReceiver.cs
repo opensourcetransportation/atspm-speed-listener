@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using SpeedListener.LogMessages;
 using System.Net.Sockets;
 
 namespace SpeedListener.Receivers;
@@ -8,6 +9,7 @@ public sealed class UdpDatagramReceiver(int port, TimeProvider timeProvider, ILo
     : IUdpDatagramReceiver
 {
     private readonly UdpClient _client = new(port);
+    private readonly SpeedListenerLogMessages _log = new(logger);
     private bool _disposed;
 
     /// <inheritdoc/>
@@ -15,7 +17,7 @@ public sealed class UdpDatagramReceiver(int port, TimeProvider timeProvider, ILo
         Func<UdpDatagram, CancellationToken, ValueTask> onDatagram,
         CancellationToken cancellationToken)
     {
-        logger.LogInformation("UDP speed listener bound to port {Port}", port);
+        _log.UdpBound(port);
         try
         {
             while (!cancellationToken.IsCancellationRequested)

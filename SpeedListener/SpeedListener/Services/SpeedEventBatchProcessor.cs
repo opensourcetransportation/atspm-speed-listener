@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Newtonsoft.Json.Linq;
 using SpeedListener.Configuration;
+using SpeedListener.LogMessages;
 using SpeedListener.Publishing;
 using System.Threading.Channels;
 using Utah.Udot.Atspm.Data.Models.EventLogModels;
@@ -18,6 +19,7 @@ public sealed class SpeedEventBatchProcessor(
     ILogger<SpeedEventBatchProcessor> logger) : ISpeedEventBatchProcessor
 {
     private int _inFlightEventCount;
+    private readonly SpeedListenerLogMessages _log = new(logger);
 
     /// <inheritdoc/>
     public int InFlightEventCount => Volatile.Read(ref _inFlightEventCount);
@@ -108,8 +110,7 @@ public sealed class SpeedEventBatchProcessor(
             if (envelopes.Count > 0)
                 await publisher.PublishAsync(envelopes, options.Value.ArchiveParallelism, cancellationToken, maxAttempts);
 
-            logger.LogInformation("Processed batch of {EventCount} events into {EnvelopeCount} envelopes",
-                batch.Count, envelopes.Count);
+            _log.BatchProcessed(batch.Count, envelopes.Count);
             batch.Clear();
             completed = true;
         }

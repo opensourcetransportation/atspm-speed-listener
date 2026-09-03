@@ -56,6 +56,29 @@ public sealed class SpeedPacketParserTests
         Assert.Equal(new DateTime(2026, 9, 2, 18, 30, 0, DateTimeKind.Utc), result.Event!.Timestamp);
     }
 
+    [Fact]
+    public void Parse_BlankDetectorId_ReturnsFailure()
+    {
+        var result = _parser.Parse(Datagram(Packet(string.Empty, 25, 40)));
+
+        Assert.False(result.IsSuccess);
+        Assert.Null(result.Event);
+        Assert.Contains("blank detector identifier", result.Error);
+    }
+
+    [Fact]
+    public void Parse_InvalidTimestamp_UsesReceiptTime()
+    {
+        var packet = Packet("ABC123", 25, 40)
+            .Concat(Encoding.ASCII.GetBytes("~not-a-timestamp\r\n"))
+            .ToArray();
+
+        var result = _parser.Parse(Datagram(packet));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(new DateTime(2026, 9, 2, 18, 0, 0, DateTimeKind.Utc), result.Event!.Timestamp);
+    }
+
     private static byte[] Packet(string detectorId, byte mph, byte kph)
     {
         var packet = new byte[16];

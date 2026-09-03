@@ -51,17 +51,78 @@ public sealed class SpeedEventBatchProcessorTests
         Assert.NotEmpty(publisher.Batches);
     }
 
-    private static SpeedEventBatchProcessor CreateProcessor(RecordingPublisher publisher, int batchSize = 10)
+    [Fact]
+    public async Task ProcessAsync_WhenFlushIntervalElapses_PublishesPartialBatchBeforeCompletion()
+    {
+        var publisher = new RecordingPublisher();
+        var processor = CreateProcessor(publisher, flushInterval: TimeSpan.FromMilliseconds(50));
+        var channel = Channel.CreateUnbounded<SpeedEvent>();
+        var processing = processor.ProcessAsync(channel.Reader, CancellationToken.None);
+        var speedEvent = Event("D1", new DateTime(2026, 9, 2, 18, 0, 0, DateTimeKind.Utc), 30);
+
+        await channel.Writer.WriteAsync(speedEvent);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await publisher.Published.Task.WaitAsync(timeout.Token);
+
+        Assert.Single(publisher.Batches);
+        var envelope = Assert.Single(publisher.Batches[0]);
+        Assert.Equal(1, envelope.DeviceId);
+        Assert.Equal(speedEvent.Timestamp, envelope.Start);
+        Assert.Null(publisher.AttemptBudgets[0]);
+
+        channel.Writer.Complete();
+        await processing;
+    }
+
+    [Fact]
+    public async Task ProcessAsync_UnknownDetector_IsCountedAndNotPublished()
+    {
+        var publisher = new RecordingPublisher();
+        var metrics = new SpeedListenerMetrics(TimeProvider.System);
+        var processor = CreateProcessor(publisher, metrics: metrics);
+        var channel = Channel.CreateUnbounded<SpeedEvent>();
+        channel.Writer.TryWrite(Event("unknown", DateTime.UtcNow, 30));
+        channel.Writer.Complete();
+
+        await processor.ProcessAsync(channel.Reader, CancellationToken.None);
+
+        Assert.Empty(publisher.Batches);
+        Assert.Equal(1, metrics.Unknown);
+        Assert.Equal(0, processor.InFlightEventCount);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_PublisherFailure_PropagatesAndRetainsInFlightCount()
+    {
+        var expected = new InvalidOperationException("write failed");
+        var publisher = new RecordingPublisher { Exception = expected };
+        var processor = CreateProcessor(publisher);
+        var channel = Channel.CreateUnbounded<SpeedEvent>();
+        channel.Writer.TryWrite(Event("D1", DateTime.UtcNow, 30));
+        channel.Writer.Complete();
+
+        var actual = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => processor.ProcessAsync(channel.Reader, CancellationToken.None));
+
+        Assert.Same(expected, actual);
+        Assert.Equal(1, processor.InFlightEventCount);
+    }
+
+    private static SpeedEventBatchProcessor CreateProcessor(
+        RecordingPublisher publisher,
+        int batchSize = 10,
+        TimeSpan? flushInterval = null,
+        SpeedListenerMetrics? metrics = null)
     {
         var configuration = Options.Create(new SpeedListenerConfiguration
         {
             BatchSize = batchSize,
-            FlushInterval = TimeSpan.FromMinutes(1),
+            FlushInterval = flushInterval ?? TimeSpan.FromMinutes(1),
             ArchiveParallelism = 1
         });
         return new SpeedEventBatchProcessor(
             new StubMappingProvider(), publisher, configuration, TimeProvider.System,
-            new SpeedListenerMetrics(TimeProvider.System),
+            metrics ?? new SpeedListenerMetrics(TimeProvider.System),
             NullLogger<SpeedEventBatchProcessor>.Instance);
     }
 
@@ -92,6 +153,7 @@ public sealed class SpeedEventBatchProcessorTests
         public List<IReadOnlyList<EventBatchEnvelope>> Batches { get; } = [];
         public List<int?> AttemptBudgets { get; } = [];
         public TaskCompletionSource Published { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public Exception? Exception { get; init; }
 
         public Task PublishAsync(EventBatchEnvelope message, CancellationToken cancellationToken = default) =>
             PublishAsync([message], 1, cancellationToken);
@@ -102,7 +164,7 @@ public sealed class SpeedEventBatchProcessorTests
             Batches.Add(batch);
             AttemptBudgets.Add(maxAttempts);
             Published.TrySetResult();
-            return Task.CompletedTask;
+            return Exception is null ? Task.CompletedTask : Task.FromException(Exception);
         }
     }
 }

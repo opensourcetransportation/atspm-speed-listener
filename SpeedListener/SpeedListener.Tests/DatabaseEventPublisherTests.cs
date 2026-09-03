@@ -110,6 +110,75 @@ public sealed class DatabaseEventPublisherTests
         await publisher.PublishAsync(CreateEnvelope());
 
         repository.Verify(instance => instance.LookupAsync(It.IsAny<CompressedEventLogBase>()), Times.Exactly(2));
+        repository.Verify(instance => instance.AddAsync(It.IsAny<CompressedEventLogBase>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task PublishAsync_MixedBatch_IsolatesPoisonEnvelopeAndArchivesHealthyEnvelope()
+    {
+        var repository = new Mock<IEventLogRepository>();
+        repository.SetupSequence(instance => instance.LookupAsync(It.IsAny<CompressedEventLogBase>()))
+            .ThrowsAsync(new FakeDbException("23505"))
+            .ThrowsAsync(new FakeDbException("23505"))
+            .ReturnsAsync((CompressedEventLogBase?)null);
+        repository.Setup(instance => instance.AddAsync(It.IsAny<CompressedEventLogBase>())).Returns(Task.CompletedTask);
+        var publisher = CreatePublisher(repository, poisonThreshold: 2);
+        var poison = CreateEnvelope();
+        var healthy = CreateEnvelope(deviceId: 2, locationIdentifier: "L2", detectorId: "D2");
+
+        await publisher.PublishAsync([poison, healthy], parallelism: 1);
+
+        repository.Verify(instance => instance.AddAsync(
+            It.Is<CompressedEventLogBase>(value => value.DeviceId == 2 && value.LocationIdentifier == "L2")),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task PublishAsync_Success_ResetsConsecutivePoisonDropCount()
+    {
+        var repository = new Mock<IEventLogRepository>();
+        repository.SetupSequence(instance => instance.LookupAsync(It.IsAny<CompressedEventLogBase>()))
+            .ThrowsAsync(new FakeDbException("23505"))
+            .ReturnsAsync((CompressedEventLogBase?)null)
+            .ThrowsAsync(new FakeDbException("23505"));
+        repository.Setup(instance => instance.AddAsync(It.IsAny<CompressedEventLogBase>())).Returns(Task.CompletedTask);
+        var publisher = CreatePublisher(repository, poisonThreshold: 2);
+        var envelope = CreateEnvelope();
+
+        await publisher.PublishAsync(envelope);
+        await publisher.PublishAsync(envelope);
+        await publisher.PublishAsync(envelope);
+
+        repository.Verify(instance => instance.LookupAsync(It.IsAny<CompressedEventLogBase>()), Times.Exactly(3));
+    }
+
+    [Fact]
+    public async Task PublishAsync_SameHourBatchesAccumulateAndReplayIsIdempotent()
+    {
+        var repository = new Mock<IEventLogRepository>();
+        CompressedEventLogs<SpeedEvent>? stored = null;
+        repository.Setup(instance => instance.LookupAsync(It.IsAny<CompressedEventLogBase>()))
+            .ReturnsAsync(() => stored);
+        repository.Setup(instance => instance.AddAsync(It.IsAny<CompressedEventLogBase>()))
+            .Callback<CompressedEventLogBase>(value => stored = Assert.IsType<CompressedEventLogs<SpeedEvent>>(value))
+            .Returns(Task.CompletedTask);
+        repository.Setup(instance => instance.UpdateAsync(It.IsAny<CompressedEventLogBase>()))
+            .Callback<CompressedEventLogBase>(value => stored = Assert.IsType<CompressedEventLogs<SpeedEvent>>(value))
+            .Returns(Task.CompletedTask);
+        var publisher = CreatePublisher(repository);
+        var first = CreateEnvelope(detectorId: "D1");
+        var second = CreateEnvelope(detectorId: "D2");
+
+        await publisher.PublishAsync(first);
+        await publisher.PublishAsync(second);
+        await publisher.PublishAsync(second);
+
+        Assert.NotNull(stored);
+        Assert.Equal(2, stored.Data.Count);
+        Assert.Contains(stored.Data, speedEvent => speedEvent.DetectorId == "D1");
+        Assert.Contains(stored.Data, speedEvent => speedEvent.DetectorId == "D2");
+        repository.Verify(instance => instance.AddAsync(It.IsAny<CompressedEventLogBase>()), Times.Once);
+        repository.Verify(instance => instance.UpdateAsync(It.IsAny<CompressedEventLogBase>()), Times.Exactly(2));
     }
 
     private static DatabaseEventPublisher CreatePublisher(Mock<IEventLogRepository> repository,
@@ -126,14 +195,17 @@ public sealed class DatabaseEventPublisherTests
             }), new SpeedListenerMetrics(TimeProvider.System), NullLogger<DatabaseEventPublisher>.Instance);
     }
 
-    private static EventBatchEnvelope CreateEnvelope()
+    private static EventBatchEnvelope CreateEnvelope(
+        int deviceId = 1,
+        string locationIdentifier = "L1",
+        string detectorId = "D1")
     {
         var timestamp = new DateTime(2026, 9, 2, 18, 30, 0, DateTimeKind.Utc);
         return new EventBatchEnvelope
         {
-            LocationIdentifier = "L1", DeviceId = 1, DataType = nameof(SpeedEvent),
+            LocationIdentifier = locationIdentifier, DeviceId = deviceId, DataType = nameof(SpeedEvent),
             Start = timestamp, End = timestamp,
-            Items = JToken.FromObject(new[] { new SpeedEvent { DetectorId = "D1", Timestamp = timestamp, Mph = 30, Kph = 48 } })
+            Items = JToken.FromObject(new[] { new SpeedEvent { DetectorId = detectorId, Timestamp = timestamp, Mph = 30, Kph = 48 } })
         };
     }
 

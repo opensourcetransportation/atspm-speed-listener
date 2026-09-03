@@ -41,7 +41,7 @@ format, for example `SpeedListenerConfiguration__UdpPort=10088`.
 | `ChannelCapacity` | `100000` | Maximum queued parsed events |
 | `BatchSize` | `5000` | Size-triggered flush threshold |
 | `FlushInterval` | `00:00:30` | Maximum age of a partial batch |
-| `ShutdownFlushTimeout` | `00:00:45` | Deadline for draining during shutdown; must exceed `WriteTimeout` |
+| `ShutdownFlushTimeout` | `00:00:45` | Drain deadline; must exceed `WriteTimeout * ShutdownMaxWriteAttempts` |
 | `ShutdownMaxWriteAttempts` | `1` | Attempts per publish while draining |
 | `DeviceMappingRefreshInterval` | `00:05:00` | ATSPM device-cache refresh interval |
 | `ArchiveParallelism` | `50` | Parallelism for envelope compression |

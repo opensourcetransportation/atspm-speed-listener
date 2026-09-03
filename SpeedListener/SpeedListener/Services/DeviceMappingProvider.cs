@@ -65,6 +65,10 @@ public sealed class DeviceMappingProvider(
                 if (!updated.TryAdd(identifier, new DeviceMapping(device.Id, device.LocationIdentifier))) duplicateCount++;
             }
 
+            if (updated.Count == 0)
+                throw new InvalidOperationException(
+                    $"No valid speed-sensor mappings were found ({invalidCount} invalid, {duplicateCount} duplicate rows).");
+
             _mappings = updated;
             _loadedAt = timeProvider.GetUtcNow();
             metrics.RecordMappingRefresh();

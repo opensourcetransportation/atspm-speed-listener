@@ -59,6 +59,8 @@ Exit criteria: fixtures parse deterministically under the recorded timestamp con
 
 Exit criteria: one database read produces an immutable lookup, batches do not query the entire device table, and refresh failure keeps the last valid mapping while logging degraded state.
 
+The initial mapping load must contain at least one valid speed-sensor mapping. An empty result fails startup; a later empty/invalid refresh retains the last valid cache.
+
 ## Phase 4: Envelope, publisher, and workflow
 
 - [ ] Move `EventBatchEnvelope` into this repository as a local type, preserving its field shape: `LocationIdentifier`, `DeviceId`, `DataType`, `Start`, `End`, `Items`.
@@ -69,7 +71,7 @@ Exit criteria: one database read produces an immutable lookup, batches do not qu
 - [x] Classify provider errors centrally. Isolate batch-data constraint failures to device envelopes and escalate repeated drops; fail immediately on schema or model mismatch.
 - [x] Do not let a schema or model mismatch drop batches and continue. Every batch fails identically, so the service would report healthy while discarding all ingest indefinitely, reintroducing the catch-log-and-return defect this phase removes.
 - [ ] Wire `ArchiveParallelism` to the workflow's archive step. Leave the save step at `MaxDegreeOfParallelism = 1`; raising it would let concurrent writers to the same device-hour lose events.
-- [ ] Apply `WriteTimeout` per attempt and pass the host cancellation token through, replacing the prototype's `CancellationToken.None`.
+- [x] Apply `WriteTimeout` per attempt and pass the host cancellation token through, replacing the prototype's `CancellationToken.None`. Fully await a failed TPL workflow before starting a retry so single-writer semantics hold across attempts.
 - [ ] Add tests for envelope construction, workflow completion, transient retry, replayed-batch idempotency, schema-mismatch process failure, terminal failure, and cancellation.
 
 Exit criteria: the migrated path produces the same compressed-event-log rows as the prototype for the same envelopes, and no failure path returns normally after losing data.

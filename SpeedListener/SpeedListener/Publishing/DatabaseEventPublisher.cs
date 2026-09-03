@@ -70,13 +70,7 @@ public sealed class DatabaseEventPublisher(
             var started = Stopwatch.GetTimestamp();
             try
             {
-                var workflow = new EventBatchEnvelopeWorkflow(scopeFactory, parallelism, timeout.Token);
-                foreach (var envelope in batch)
-                    if (!await workflow.SendAsync(envelope, timeout.Token))
-                        throw new InvalidOperationException("The TPL workflow declined a speed-event envelope.");
-
-                workflow.Complete();
-                await workflow.Completion;
+                await ExecuteWorkflowAsync(batch, parallelism, timeout.Token);
                 var latency = Stopwatch.GetElapsedTime(started);
                 metrics.RecordPublished(batch.Count, latency);
                 logger.LogInformation("Archived {Count} speed-event envelopes in {ElapsedMilliseconds} ms",
@@ -103,6 +97,34 @@ public sealed class DatabaseEventPublisher(
                     ClassifyAttempt(ex, timeout, cancellationToken), batch.Count, attempt);
                 throw;
             }
+        }
+    }
+
+    private async Task ExecuteWorkflowAsync(IReadOnlyList<EventBatchEnvelope> batch, int parallelism,
+        CancellationToken cancellationToken)
+    {
+        var workflow = new EventBatchEnvelopeWorkflow(scopeFactory, parallelism, cancellationToken);
+        try
+        {
+            foreach (var envelope in batch)
+            {
+                if (!await workflow.SendAsync(envelope, cancellationToken))
+                {
+                    // A block declines only after completion, cancellation, or fault. Awaiting completion preserves
+                    // the original provider/cancellation exception instead of replacing it with a synthetic fault.
+                    await workflow.Completion;
+                    throw new InvalidOperationException("The TPL workflow completed without accepting an envelope.");
+                }
+            }
+
+            workflow.Complete();
+            await workflow.Completion;
+        }
+        catch
+        {
+            workflow.Complete();
+            try { await workflow.Completion; } catch { }
+            throw;
         }
     }
 

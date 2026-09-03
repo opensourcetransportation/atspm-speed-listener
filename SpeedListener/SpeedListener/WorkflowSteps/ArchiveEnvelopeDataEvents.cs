@@ -1,32 +1,16 @@
 using Newtonsoft.Json.Linq;
 using SpeedListener.Publishing;
 using System.Collections;
-using System.Runtime.CompilerServices;
-using System.Threading.Tasks.Dataflow;
 using Utah.Udot.Atspm.Data.Interfaces;
 using Utah.Udot.Atspm.Data.Models;
 using Utah.Udot.Atspm.Data.Models.EventLogModels;
 using Utah.Udot.NetStandardToolkit.Common;
-using Utah.Udot.NetStandardToolkit.Workflows;
 
 namespace SpeedListener.WorkflowSteps;
 
 /// <summary>Converts envelopes into hourly compressed speed-event logs.</summary>
-public sealed class ArchiveEnvelopeDataEvents(ExecutionDataflowBlockOptions? options = null)
-    : TransformManyProcessStepBaseAsync<EventBatchEnvelope, CompressedEventLogBase>(
-        options ?? new ExecutionDataflowBlockOptions())
+public static class ArchiveEnvelopeDataEvents
 {
-    /// <inheritdoc/>
-    protected override async IAsyncEnumerable<CompressedEventLogBase> Process(
-        EventBatchEnvelope envelope,
-        [EnumeratorCancellation] CancellationToken cancellationToken = default)
-    {
-        foreach (var compressed in Archive(envelope, cancellationToken))
-            yield return compressed;
-
-        await Task.CompletedTask;
-    }
-
     /// <summary>Archives one envelope into its hourly compressed event-log rows.</summary>
     public static IEnumerable<CompressedEventLogBase> Archive(
         EventBatchEnvelope envelope,

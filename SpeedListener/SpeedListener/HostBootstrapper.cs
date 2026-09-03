@@ -43,22 +43,7 @@ public static class HostBootstrapper
             services.AddOptions<SpeedListenerConfiguration>()
                 .Bind(hostContext.Configuration.GetSection(nameof(SpeedListenerConfiguration)))
                 .Configure(configureAction)
-                .Validate(configuration =>
-                    configuration.UdpPort is > 0 and <= 65535 &&
-                    configuration.ChannelCapacity > 0 &&
-                    configuration.BatchSize > 0 &&
-                    configuration.BatchSize <= configuration.ChannelCapacity &&
-                    configuration.FlushInterval > TimeSpan.Zero &&
-                    configuration.ShutdownFlushTimeout > TimeSpan.Zero &&
-                    configuration.ShutdownFlushTimeout > configuration.WriteTimeout &&
-                    configuration.ShutdownMaxWriteAttempts > 0 &&
-                    configuration.ShutdownMaxWriteAttempts <= configuration.MaxWriteAttempts &&
-                    configuration.DeviceMappingRefreshInterval > TimeSpan.Zero &&
-                    configuration.ArchiveParallelism > 0 &&
-                    configuration.WriteTimeout > TimeSpan.Zero &&
-                    configuration.MaxWriteAttempts > 0 &&
-                    configuration.PoisonDeviceFailureThreshold > 0 &&
-                    configuration.SummaryInterval > TimeSpan.Zero,
+                .Validate(IsValidListenerConfiguration,
                     "Speed listener configuration is missing or invalid.")
                 .ValidateOnStart();
 
@@ -87,6 +72,33 @@ public static class HostBootstrapper
 
         using var host = builder.Build();
         await host.RunAsync();
+    }
+
+    /// <summary>Validates listener settings, including the complete shutdown write-attempt budget.</summary>
+    public static bool IsValidListenerConfiguration(SpeedListenerConfiguration configuration)
+    {
+        if (configuration.UdpPort is <= 0 or > 65535 ||
+            configuration.ChannelCapacity <= 0 ||
+            configuration.BatchSize <= 0 ||
+            configuration.BatchSize > configuration.ChannelCapacity ||
+            configuration.FlushInterval <= TimeSpan.Zero ||
+            configuration.ShutdownFlushTimeout <= TimeSpan.Zero ||
+            configuration.ShutdownMaxWriteAttempts <= 0 ||
+            configuration.MaxWriteAttempts <= 0 ||
+            configuration.ShutdownMaxWriteAttempts > configuration.MaxWriteAttempts ||
+            configuration.DeviceMappingRefreshInterval <= TimeSpan.Zero ||
+            configuration.ArchiveParallelism <= 0 ||
+            configuration.WriteTimeout <= TimeSpan.Zero ||
+            configuration.PoisonDeviceFailureThreshold <= 0 ||
+            configuration.SummaryInterval <= TimeSpan.Zero)
+            return false;
+
+        if (configuration.WriteTimeout.Ticks > TimeSpan.MaxValue.Ticks / configuration.ShutdownMaxWriteAttempts)
+            return false;
+
+        var shutdownWriteBudget = TimeSpan.FromTicks(
+            configuration.WriteTimeout.Ticks * configuration.ShutdownMaxWriteAttempts);
+        return configuration.ShutdownFlushTimeout > shutdownWriteBudget;
     }
 
     /// <summary>

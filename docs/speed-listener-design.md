@@ -249,7 +249,7 @@ Use a single `SpeedListenerConfiguration` section. Database connection configura
 | `ChannelCapacity` | `100000` | Maximum parsed events waiting for batching |
 | `BatchSize` | `5000` | Maximum events in an in-memory batch |
 | `FlushInterval` | `00:00:30` | Maximum age of a non-empty partial batch |
-| `ShutdownFlushTimeout` | `00:00:45` | Maximum shutdown drain/flush time; must exceed one `WriteTimeout` |
+| `ShutdownFlushTimeout` | `00:00:45` | Maximum shutdown drain/flush time; must exceed `WriteTimeout * ShutdownMaxWriteAttempts` |
 | `ShutdownMaxWriteAttempts` | `1` | Reduced attempt budget for shutdown writes |
 | `DeviceMappingRefreshInterval` | `00:05:00` | Mapping-cache lifetime |
 | `ArchiveParallelism` | `50` | Archive-step `MaxDegreeOfParallelism` in the workflow |
@@ -292,6 +292,8 @@ That check is necessary but does not make the drain complete, and the configurat
 
 Two consequences follow. Shutdown writes should use a reduced attempt budget, single-attempt by default, so the fixed budget covers as many batches as possible rather than exhausting itself retrying one. And the worst-case shutdown loss is `ChannelCapacity` events plus one in-flight batch; state that number in deployment documentation next to the outage-loss budget in section 9.
 
+Configuration validation rejects any shutdown budget that cannot cover every configured shutdown write attempt: `ShutdownFlushTimeout` must be greater than `WriteTimeout * ShutdownMaxWriteAttempts`.
+
 `FlushInterval` is a trade between ingest latency and database write volume, because each flush upserts into the affected device-hour rows. Thirty seconds is a starting point to be re-derived from the load test in phase 7, not a tuned value.
 
 ## 8. Command and dependency injection
@@ -321,6 +323,7 @@ Refactor the current emitter-specific `HostBootstrapper.RunHostAsync<TService>` 
 | Malformed packet | Skip, increment in-process counter, structured debug log without packet payload, and rate-limited warning summary |
 | Unknown sensor | Skip, increment in-process counter, rate-limited warning |
 | Mapping database unavailable at startup | Fail startup so the service can be restarted |
+| No valid speed-sensor mappings at startup | Fail startup rather than accept and discard all traffic as unknown |
 | Mapping refresh fails after startup | Continue with last known mapping, log degraded state, retry later |
 | Channel full | Apply configured drop policy and log a rate-limited warning with a running dropped count |
 | Transient database failure | Bounded retry; preserve the current batch in memory |

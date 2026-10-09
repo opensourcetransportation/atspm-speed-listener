@@ -86,10 +86,13 @@ public sealed class SpeedEventBatchProcessor(
         {
             var mappings = await mappingProvider.GetMappingsAsync(cancellationToken);
             var envelopes = new List<EventBatchEnvelope>();
-            foreach (var group in batch.GroupBy(speedEvent => speedEvent.DetectorId, StringComparer.OrdinalIgnoreCase))
+            foreach (var group in batch.GroupBy(speedEvent =>
+                     {
+                         var detectorId = speedEvent.DetectorId?.Trim() ?? string.Empty;
+                         return detectorId.Length >= 4 ? detectorId[..4] : string.Empty;
+                     }, StringComparer.OrdinalIgnoreCase))
             {
-                var detectorId = group.Key?.Trim() ?? string.Empty;
-                if (!mappings.TryGetValue(detectorId, out var mapping))
+                if (!mappings.TryGetValue(group.Key, out var mapping))
                 {
                     metrics.RecordUnknown(group.LongCount());
                     continue;

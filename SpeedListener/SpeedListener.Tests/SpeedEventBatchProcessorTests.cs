@@ -11,15 +11,49 @@ namespace SpeedListener.Tests;
 public sealed class SpeedEventBatchProcessorTests
 {
     [Fact]
+    public async Task ProcessAsync_ChannelsAtSameLocation_ShareDeviceAndKeepFullDetectorIds()
+    {
+        var publisher = new RecordingPublisher();
+        var processor = CreateProcessor(publisher);
+        var channel = Channel.CreateUnbounded<SpeedEvent>();
+        foreach (var id in new[] { "502620", "502618", "502622" })
+            channel.Writer.TryWrite(Event(id, DateTime.UtcNow, 30));
+        channel.Writer.Complete();
+        await processor.ProcessAsync(channel.Reader, CancellationToken.None);
+        var envelope = Assert.Single(Assert.Single(publisher.Batches));
+        Assert.Equal(1, envelope.DeviceId);
+        Assert.Equal("5026", envelope.LocationIdentifier);
+        Assert.Equal(new[] { "502620", "502618", "502622" },
+            envelope.Items.Select(item => (string?)item["DetectorId"]));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("502")]
+    [InlineData("999920")]
+    public async Task ProcessAsync_ShortOrUnmappedPrefix_IsCountedWithoutPublishing(string detectorId)
+    {
+        var publisher = new RecordingPublisher();
+        var metrics = new SpeedListenerMetrics(TimeProvider.System);
+        var processor = CreateProcessor(publisher, metrics: metrics);
+        var channel = Channel.CreateUnbounded<SpeedEvent>();
+        channel.Writer.TryWrite(Event(detectorId, DateTime.UtcNow, 30));
+        channel.Writer.Complete();
+        await processor.ProcessAsync(channel.Reader, CancellationToken.None);
+        Assert.Empty(publisher.Batches);
+        Assert.Equal(1, metrics.Unknown);
+    }
+
+    [Fact]
     public async Task ProcessAsync_WhenChannelCompletes_PublishesPartialBatchGroupedByDevice()
     {
         var publisher = new RecordingPublisher();
         var processor = CreateProcessor(publisher);
         var channel = Channel.CreateUnbounded<SpeedEvent>();
         var first = new DateTime(2026, 9, 2, 18, 0, 0, DateTimeKind.Utc);
-        channel.Writer.TryWrite(Event("D1", first, 30));
-        channel.Writer.TryWrite(Event("D1", first.AddSeconds(1), 31));
-        channel.Writer.TryWrite(Event("D2", first.AddSeconds(2), 32));
+        channel.Writer.TryWrite(Event("502620", first, 30));
+        channel.Writer.TryWrite(Event("502620", first.AddSeconds(1), 31));
+        channel.Writer.TryWrite(Event("527148", first.AddSeconds(2), 32));
         channel.Writer.Complete();
 
         await processor.ProcessAsync(channel.Reader, CancellationToken.None);
@@ -40,8 +74,8 @@ public sealed class SpeedEventBatchProcessorTests
         var processor = CreateProcessor(publisher, batchSize: 2);
         var channel = Channel.CreateUnbounded<SpeedEvent>();
         var processing = processor.ProcessAsync(channel.Reader, CancellationToken.None);
-        channel.Writer.TryWrite(Event("D1", DateTime.UtcNow, 30));
-        channel.Writer.TryWrite(Event("D2", DateTime.UtcNow, 31));
+        channel.Writer.TryWrite(Event("502620", DateTime.UtcNow, 30));
+        channel.Writer.TryWrite(Event("527148", DateTime.UtcNow, 31));
 
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
         await publisher.Published.Task.WaitAsync(timeout.Token);
@@ -58,7 +92,7 @@ public sealed class SpeedEventBatchProcessorTests
         var processor = CreateProcessor(publisher, flushInterval: TimeSpan.FromMilliseconds(50));
         var channel = Channel.CreateUnbounded<SpeedEvent>();
         var processing = processor.ProcessAsync(channel.Reader, CancellationToken.None);
-        var speedEvent = Event("D1", new DateTime(2026, 9, 2, 18, 0, 0, DateTimeKind.Utc), 30);
+        var speedEvent = Event("502620", new DateTime(2026, 9, 2, 18, 0, 0, DateTimeKind.Utc), 30);
 
         await channel.Writer.WriteAsync(speedEvent);
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
@@ -98,7 +132,7 @@ public sealed class SpeedEventBatchProcessorTests
         var publisher = new RecordingPublisher { Exception = expected };
         var processor = CreateProcessor(publisher);
         var channel = Channel.CreateUnbounded<SpeedEvent>();
-        channel.Writer.TryWrite(Event("D1", DateTime.UtcNow, 30));
+        channel.Writer.TryWrite(Event("502620", DateTime.UtcNow, 30));
         channel.Writer.Complete();
 
         var actual = await Assert.ThrowsAsync<InvalidOperationException>(
@@ -139,8 +173,8 @@ public sealed class SpeedEventBatchProcessorTests
         private static readonly IReadOnlyDictionary<string, DeviceMapping> Mappings =
             new Dictionary<string, DeviceMapping>(StringComparer.OrdinalIgnoreCase)
             {
-                ["D1"] = new(1, "L1"),
-                ["D2"] = new(2, "L2")
+                ["5026"] = new(1, "5026"),
+                ["5271"] = new(2, "5271")
             };
 
         public Task<IReadOnlyDictionary<string, DeviceMapping>> GetMappingsAsync(CancellationToken cancellationToken) =>

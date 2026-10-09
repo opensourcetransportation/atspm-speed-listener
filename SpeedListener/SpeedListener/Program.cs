@@ -32,6 +32,44 @@ public class Program
     /// <returns>Returns the command-line exit execution code.</returns>
     public static async Task<int> Main(string[] args)
     {
+        var diagnosticPath = Environment.GetEnvironmentVariable("ATSPM_STARTUP_LOG");
+        if (string.IsNullOrWhiteSpace(diagnosticPath))
+            return await RunCommandAsync(args);
+
+        var originalOutput = Console.Out;
+        var originalError = Console.Error;
+        using var diagnosticWriter = new StreamWriter(new FileStream(
+            diagnosticPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite)) { AutoFlush = true };
+        var synchronizedWriter = TextWriter.Synchronized(diagnosticWriter);
+        Console.SetOut(synchronizedWriter);
+        Console.SetError(synchronizedWriter);
+        try
+        {
+            TraceStartup($"Process entered Main; PID={Environment.ProcessId}; runtime={Environment.Version}; base={AppContext.BaseDirectory}; working directory={Environment.CurrentDirectory}");
+            var result = await RunCommandAsync(args);
+            TraceStartup($"Command exited with code {result}");
+            return result;
+        }
+        catch (Exception exception)
+        {
+            Console.Error.WriteLine(exception);
+            throw;
+        }
+        finally
+        {
+            Console.SetOut(originalOutput);
+            Console.SetError(originalError);
+        }
+    }
+
+    internal static void TraceStartup(string message)
+    {
+        if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("ATSPM_STARTUP_LOG")))
+            Console.Error.WriteLine($"{DateTimeOffset.UtcNow:O} STARTUP: {message}");
+    }
+
+    private static async Task<int> RunCommandAsync(string[] args)
+    {
         var rootCommand = new RootCommand("ATSPM Speed Listener Utility")
         {
             new EmmitterCommand(),

@@ -41,15 +41,26 @@ public static class HostBootstrapper
     /// <summary>Runs the speed listener host.</summary>
     public static async Task RunListenerHostAsync(Action<SpeedListenerConfiguration> configureAction)
     {
+        Program.TraceStartup("Listener command entered; checking Windows service detection");
+        Program.TraceStartup($"Windows service detected: {Microsoft.Extensions.Hosting.WindowsServices.WindowsServiceHelpers.IsWindowsService()}");
         AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
         var builder = Host.CreateDefaultBuilder()
-            .ApplyVolumeConfiguration()
+            .UseContentRoot(AppContext.BaseDirectory)
+            .UseWindowsService(options => options.ServiceName = "AtspmSpeedListener")
+            // Services start in System32; the toolkit resolves relative paths
+            // against the working directory, not the host's content root.
+            .ApplyVolumeConfiguration(Microsoft.Extensions.Hosting.WindowsServices.WindowsServiceHelpers.IsWindowsService()
+                ? Path.Combine(AppContext.BaseDirectory, "Configuration")
+                : "Configuration")
             .ConfigureLogging((hostContext, logging) =>
             {
+                Program.TraceStartup("Configuring event logging");
                 if (OperatingSystem.IsWindows())
                     TryConfigureWindowsEventLog(logging);
 
+                Program.TraceStartup("Configuring Google logging");
                 logging.AddGoogle(hostContext);
+                Program.TraceStartup("Logging configured");
             });
         builder.ConfigureServices((hostContext, services) =>
         {
@@ -83,7 +94,9 @@ public static class HostBootstrapper
             services.AddHostedService<SpeedListenerBackgroundService>();
         });
 
+        Program.TraceStartup("Building listener host");
         using var host = builder.Build();
+        Program.TraceStartup($"Host built; lifetime={host.Services.GetRequiredService<IHostLifetime>().GetType().FullName}; starting host");
         await host.RunAsync();
     }
 
@@ -101,6 +114,7 @@ public static class HostBootstrapper
             configuration.ShutdownMaxWriteAttempts > configuration.MaxWriteAttempts ||
             configuration.DeviceMappingRefreshInterval <= TimeSpan.Zero ||
             configuration.ArchiveParallelism <= 0 ||
+            configuration.DatabaseWriteParallelism <= 0 ||
             configuration.WriteTimeout <= TimeSpan.Zero ||
             configuration.PoisonDeviceFailureThreshold <= 0 ||
             configuration.SummaryInterval <= TimeSpan.Zero)
@@ -117,12 +131,15 @@ public static class HostBootstrapper
     [SupportedOSPlatform("windows")]
     private static void TryConfigureWindowsEventLog(ILoggingBuilder logging)
     {
-        const string logName = "Atspm";
-        var sourceName = AppDomain.CurrentDomain.FriendlyName;
+        const string preferredLogName = "Atspm";
+        const string sourceName = "AtspmSpeedListener";
         try
         {
             if (!EventLog.SourceExists(sourceName))
-                EventLog.CreateEventSource(sourceName, logName);
+                EventLog.CreateEventSource(sourceName, preferredLogName);
+            // Event sources are machine-wide and can belong to only one log.
+            // Honor an existing registration instead of breaking host startup.
+            var logName = EventLog.LogNameFromSourceName(sourceName, ".");
             logging.AddEventLog(configuration =>
             {
                 configuration.SourceName = sourceName;

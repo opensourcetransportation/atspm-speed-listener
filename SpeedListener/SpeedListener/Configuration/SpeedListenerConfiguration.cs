@@ -27,6 +27,8 @@ public sealed class SpeedListenerConfiguration
     public TimeSpan DeviceMappingRefreshInterval { get; set; } = TimeSpan.FromMinutes(5);
     /// <summary>Gets or sets archive transformation parallelism.</summary>
     public int ArchiveParallelism { get; set; } = 50;
+    /// <summary>Gets or sets concurrent database writers across independent devices.</summary>
+    public int DatabaseWriteParallelism { get; set; } = 8;
     /// <summary>Gets or sets the timeout for one database write attempt.</summary>
     public TimeSpan WriteTimeout { get; set; } = TimeSpan.FromSeconds(30);
     /// <summary>Gets or sets the maximum database write attempts.</summary>

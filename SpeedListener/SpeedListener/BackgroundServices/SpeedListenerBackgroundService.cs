@@ -39,17 +39,26 @@ public sealed class SpeedListenerBackgroundService(
         var producer = receiver.ReceiveAsync((datagram, _) =>
         {
             metrics.RecordReceived();
-            var result = parser.Parse(datagram);
-            if (!result.IsSuccess)
+            foreach (var result in parser.ParseMany(datagram))
             {
-                metrics.RecordRejected();
-                _log.PacketRejected(datagram.RemoteEndPoint, result.Error);
+                if (!result.IsSuccess)
+                {
+                    metrics.RecordRejected();
+                    if (logger.IsEnabled(LogLevel.Debug))
+                    {
+                        var previewLength = Math.Min(datagram.Buffer.Length, 64);
+                        var payloadHex = Convert.ToHexString(datagram.Buffer.AsSpan(0, previewLength));
+                        _log.PacketRejected(datagram.RemoteEndPoint,
+                            $"{result.Error} DatagramLength={datagram.Buffer.Length}; PayloadHex={payloadHex}" +
+                            (previewLength < datagram.Buffer.Length ? " (first 64 bytes)" : string.Empty));
+                    }
+                }
+                else if (!channel.Writer.TryWrite(result.Event!))
+                {
+                    metrics.RecordDropped();
+                }
+                else metrics.RecordParsed();
             }
-            else if (!channel.Writer.TryWrite(result.Event!))
-            {
-                metrics.RecordDropped();
-            }
-            else metrics.RecordParsed();
 
             return ValueTask.CompletedTask;
         }, receiveCancellation.Token);

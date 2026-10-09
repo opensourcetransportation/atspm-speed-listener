@@ -99,7 +99,8 @@ public sealed class DatabaseEventPublisher(
     private async Task ExecuteWorkflowAsync(IReadOnlyList<EventBatchEnvelope> batch, int parallelism,
         CancellationToken cancellationToken)
     {
-        var workflow = new EventBatchEnvelopeWorkflow(scopeFactory, parallelism, cancellationToken);
+        var workflow = new EventBatchEnvelopeWorkflow(scopeFactory, parallelism, cancellationToken,
+            options.Value.DatabaseWriteParallelism);
         try
         {
             foreach (var envelope in batch)

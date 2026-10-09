@@ -1,6 +1,6 @@
 namespace SpeedListener.Services;
 
-/// <summary>Provides normalized speed-sensor device mappings.</summary>
+/// <summary>Maps four-character location identifiers to current-version speed devices.</summary>
 public interface IDeviceMappingProvider
 {
     /// <summary>Refreshes mappings from ATSPM configuration storage.</summary>

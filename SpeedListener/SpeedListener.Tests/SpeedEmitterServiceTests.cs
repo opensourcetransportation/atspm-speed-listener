@@ -33,6 +33,20 @@ namespace SpeedListener.Tests;
 /// </summary>
 public class SpeedEmitterServiceTests
 {
+    [Fact]
+    public void CreateSpeedPacket_NumericDetector_RoundTripsThroughValidatedParser()
+    {
+        var service = new SpeedEmitterService(_options, _deviceRepositoryMock.Object, _loggerMock.Object);
+        var packet = service.CreateSpeedPacket("502620", 41, 66);
+        var result = new SpeedListener.Parsing.SpeedPacketParser().Parse(
+            new SpeedListener.Receivers.UdpDatagram(packet,
+                new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, 10088), DateTimeOffset.UtcNow));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("502620", result.Event!.DetectorId);
+        Assert.Equal(41, result.Event.Mph);
+    }
+
     private readonly Mock<IDeviceRepository> _deviceRepositoryMock;
     private readonly Mock<ILogger<SpeedEmitterService>> _loggerMock;
     private readonly SpeedEmitterConfiguration _config;

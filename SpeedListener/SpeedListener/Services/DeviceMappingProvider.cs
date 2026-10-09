@@ -41,30 +41,35 @@ public sealed class DeviceMappingProvider(
 
             using var scope = scopeFactory.CreateScope();
             var context = scope.ServiceProvider.GetRequiredService<ConfigContext>();
-            var devices = await context.Devices
+            var now = timeProvider.GetUtcNow().UtcDateTime;
+            var locations = await context.Locations
                 .AsNoTracking()
-                .Where(d => d.DeviceType == DeviceTypes.SpeedSensor)
-                .OrderBy(d => d.Id)
-                .Select(d => new MappingRow(d.Id, d.DeviceIdentifier, d.Location.LocationIdentifier))
+                .Where(location => location.Start <= now && location.VersionAction != LocationVersionActions.Delete)
+                .Select(location => new
+                {
+                    location.Id, location.LocationIdentifier, location.Start, location.VersionAction,
+                    DeviceId = location.Devices.Where(device => device.DeviceType == DeviceTypes.SpeedSensor)
+                        .OrderBy(device => device.Id).Select(device => (int?)device.Id).FirstOrDefault()
+                })
                 .ToListAsync(cancellationToken);
             var updated = new Dictionary<string, DeviceMapping>(StringComparer.OrdinalIgnoreCase);
             var invalidCount = 0;
             var duplicateCount = 0;
 
-            foreach (var device in devices)
+            foreach (var versions in locations.GroupBy(location => location.LocationIdentifier?.Trim() ?? string.Empty,
+                         StringComparer.OrdinalIgnoreCase))
             {
-                var identifier = device.DeviceIdentifier?.Trim();
-                if (string.IsNullOrWhiteSpace(identifier))
+                var identifier = versions.Key;
+                if (identifier.Length != 4)
                 {
                     invalidCount++;
                     continue;
                 }
-                if (string.IsNullOrWhiteSpace(device.LocationIdentifier))
-                {
-                    invalidCount++;
+                var current = versions.OrderByDescending(location => location.Start)
+                    .ThenByDescending(location => location.Id).First();
+                if (!current.DeviceId.HasValue)
                     continue;
-                }
-                if (!updated.TryAdd(identifier, new DeviceMapping(device.Id, device.LocationIdentifier))) duplicateCount++;
+                updated.Add(identifier, new DeviceMapping(current.DeviceId.Value, identifier));
             }
 
             if (updated.Count == 0)
@@ -94,5 +99,4 @@ public sealed class DeviceMappingProvider(
         }
     }
 
-    private sealed record MappingRow(int Id, string? DeviceIdentifier, string? LocationIdentifier);
 }

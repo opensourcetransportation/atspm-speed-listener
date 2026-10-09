@@ -36,6 +36,7 @@ public sealed class HostBootstrapperTests
             ("shutdown attempts exceed normal attempts", value => value.ShutdownMaxWriteAttempts = value.MaxWriteAttempts + 1),
             ("mapping refresh", value => value.DeviceMappingRefreshInterval = TimeSpan.Zero),
             ("archive parallelism", value => value.ArchiveParallelism = 0),
+            ("database writer parallelism", value => value.DatabaseWriteParallelism = 0),
             ("write timeout", value => value.WriteTimeout = TimeSpan.Zero),
             ("poison threshold", value => value.PoisonDeviceFailureThreshold = 0),
             ("summary interval", value => value.SummaryInterval = TimeSpan.Zero)

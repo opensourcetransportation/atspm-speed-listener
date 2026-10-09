@@ -16,6 +16,29 @@ namespace SpeedListener.Tests;
 public sealed class SpeedListenerBackgroundServiceTests
 {
     [Fact]
+    public async Task StopAsync_MultipleMessagesInDatagram_ArchivesEachAndCountsRejection()
+    {
+        var receiver = new ControlledReceiver
+        {
+            Payload = Convert.FromHexString("585329427E0D0D585329423530323632307E0D0D58532A443530323632327E0D0D")
+        };
+        var publisher = new RecordingPublisher();
+        var metrics = new SpeedListenerMetrics(TimeProvider.System);
+        var service = CreateService(receiver, new StubMappingProvider(), publisher, new SpeedPacketParser(), metrics);
+
+        await service.StartAsync(CancellationToken.None);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await receiver.DatagramDelivered.Task.WaitAsync(timeout.Token);
+        await service.StopAsync(timeout.Token);
+
+        Assert.Equal(1, metrics.Received);
+        Assert.Equal(2, metrics.Parsed);
+        Assert.Equal(1, metrics.Rejected);
+        var envelope = Assert.Single(Assert.Single(publisher.Batches));
+        Assert.Equal(2, envelope.Items.Count());
+    }
+
+    [Fact]
     public async Task StopAsync_AfterReceivingEvent_DrainsPartialBatchWithShutdownAttemptBudget()
     {
         var receiver = new ControlledReceiver();
@@ -56,7 +79,9 @@ public sealed class SpeedListenerBackgroundServiceTests
     private static SpeedListenerBackgroundService CreateService(
         ControlledReceiver receiver,
         StubMappingProvider mappings,
-        RecordingPublisher publisher)
+        RecordingPublisher publisher,
+        ISpeedPacketParser? parser = null,
+        SpeedListenerMetrics? metrics = null)
     {
         var options = Options.Create(new SpeedListenerConfiguration
         {
@@ -68,7 +93,7 @@ public sealed class SpeedListenerBackgroundServiceTests
             ArchiveParallelism = 1,
             SummaryInterval = TimeSpan.FromHours(1)
         });
-        var metrics = new SpeedListenerMetrics(TimeProvider.System);
+        metrics ??= new SpeedListenerMetrics(TimeProvider.System);
         var processor = new SpeedEventBatchProcessor(
             mappings,
             publisher,
@@ -79,7 +104,7 @@ public sealed class SpeedListenerBackgroundServiceTests
 
         return new SpeedListenerBackgroundService(
             receiver,
-            new SuccessfulParser(),
+            parser ?? new SuccessfulParser(),
             mappings,
             processor,
             options,
@@ -92,13 +117,14 @@ public sealed class SpeedListenerBackgroundServiceTests
         public TaskCompletionSource DatagramDelivered { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
         public Exception? Failure { get; init; }
+        public byte[] Payload { get; init; } = new byte[16];
 
         public async Task ReceiveAsync(
             Func<UdpDatagram, CancellationToken, ValueTask> onDatagram,
             CancellationToken cancellationToken)
         {
             await onDatagram(new UdpDatagram(
-                new byte[16],
+                Payload,
                 new IPEndPoint(IPAddress.Loopback, 10088),
                 DateTimeOffset.UtcNow), cancellationToken);
             DatagramDelivered.TrySetResult();
@@ -122,7 +148,7 @@ public sealed class SpeedListenerBackgroundServiceTests
         public SpeedPacketParseResult Parse(UdpDatagram datagram) =>
             SpeedPacketParseResult.Success(new SpeedEvent
             {
-                DetectorId = "D7",
+                DetectorId = "502620",
                 Timestamp = datagram.ReceivedAt.UtcDateTime,
                 Mph = 30,
                 Kph = 48
@@ -134,7 +160,7 @@ public sealed class SpeedListenerBackgroundServiceTests
         private static readonly IReadOnlyDictionary<string, DeviceMapping> Mappings =
             new Dictionary<string, DeviceMapping>(StringComparer.OrdinalIgnoreCase)
             {
-                ["D7"] = new(7, "L7")
+                ["5026"] = new(7, "L7")
             };
 
         public int RefreshCount { get; private set; }

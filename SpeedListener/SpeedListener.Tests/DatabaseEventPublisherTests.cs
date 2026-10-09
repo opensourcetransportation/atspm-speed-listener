@@ -117,11 +117,14 @@ public sealed class DatabaseEventPublisherTests
     public async Task PublishAsync_MixedBatch_IsolatesPoisonEnvelopeAndArchivesHealthyEnvelope()
     {
         var repository = new Mock<IEventLogRepository>();
-        repository.SetupSequence(instance => instance.LookupAsync(It.IsAny<CompressedEventLogBase>()))
-            .ThrowsAsync(new FakeDbException("23505"))
-            .ThrowsAsync(new FakeDbException("23505"))
-            .ReturnsAsync((CompressedEventLogBase?)null);
-        repository.Setup(instance => instance.AddAsync(It.IsAny<CompressedEventLogBase>())).Returns(Task.CompletedTask);
+        CompressedEventLogBase? healthyStored = null;
+        repository.Setup(instance => instance.LookupAsync(It.IsAny<CompressedEventLogBase>()))
+            .Returns((CompressedEventLogBase row) => row.DeviceId == 1
+                ? Task.FromException<CompressedEventLogBase>(new FakeDbException("23505"))
+                : Task.FromResult(healthyStored!));
+        repository.Setup(instance => instance.AddAsync(It.IsAny<CompressedEventLogBase>()))
+            .Callback<CompressedEventLogBase>(row => healthyStored = row).Returns(Task.CompletedTask);
+        repository.Setup(instance => instance.UpdateAsync(It.IsAny<CompressedEventLogBase>())).Returns(Task.CompletedTask);
         var publisher = CreatePublisher(repository, poisonThreshold: 2);
         var poison = CreateEnvelope();
         var healthy = CreateEnvelope(deviceId: 2, locationIdentifier: "L2", detectorId: "D2");

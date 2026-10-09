@@ -51,6 +51,9 @@ Mkfile.old
 dkms.conf
 
 # Build artifacts
+/build/
+*.pcapng
+*.etl
 **/bin/
 **/obj/
 .dotnet/

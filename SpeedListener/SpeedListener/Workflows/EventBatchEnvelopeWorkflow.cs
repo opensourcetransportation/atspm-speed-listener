@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using SpeedListener.Publishing;
 using SpeedListener.WorkflowSteps;
 using System.Threading.Tasks.Dataflow;
+using System.Collections.Concurrent;
 using Utah.Udot.Atspm.Data.Models;
 using Utah.Udot.Atspm.Extensions;
 using Utah.Udot.Atspm.Repositories.EventLogRepositories;
@@ -9,7 +10,7 @@ using Utah.Udot.Atspm.Repositories.EventLogRepositories;
 namespace SpeedListener.Workflows;
 
 /// <summary>
-/// TPL Dataflow workflow that archives envelopes in parallel and persists compressed logs through one writer.
+/// Archives envelopes in parallel and writes independent devices concurrently.
 /// </summary>
 public sealed class EventBatchEnvelopeWorkflow
 {
@@ -17,8 +18,12 @@ public sealed class EventBatchEnvelopeWorkflow
     public EventBatchEnvelopeWorkflow(
         IServiceScopeFactory scopeFactory,
         int parallelProcesses = 50,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        int databaseWriteParallelism = 8)
     {
+        if (databaseWriteParallelism <= 0)
+            throw new ArgumentOutOfRangeException(nameof(databaseWriteParallelism));
+        var deviceLocks = new ConcurrentDictionary<int, SemaphoreSlim>();
         Archive = new TransformManyBlock<EventBatchEnvelope, CompressedEventLogBase>(
             envelope => ArchiveEnvelopeDataEvents.Archive(envelope, cancellationToken),
             new ExecutionDataflowBlockOptions
@@ -29,13 +34,23 @@ public sealed class EventBatchEnvelopeWorkflow
 
         Save = new ActionBlock<CompressedEventLogBase>(async compressed =>
         {
-            await using var scope = scopeFactory.CreateAsyncScope();
-            var repository = scope.ServiceProvider.GetRequiredService<IEventLogRepository>();
-            await repository.Upsert(compressed);
+            // Upsert is read/merge/write. Never overlap writes for the same device,
+            // including repeated envelopes for one hourly row.
+            var deviceLock = deviceLocks.GetOrAdd(compressed.DeviceId, _ => new SemaphoreSlim(1, 1));
+            await deviceLock.WaitAsync(cancellationToken);
+            try
+            {
+                await using var scope = scopeFactory.CreateAsyncScope();
+                var repository = scope.ServiceProvider.GetRequiredService<IEventLogRepository>();
+                await repository.Upsert(compressed);
+            }
+            finally
+            {
+                deviceLock.Release();
+            }
         }, new ExecutionDataflowBlockOptions
         {
-            MaxDegreeOfParallelism = 1,
-            EnsureOrdered = true,
+            MaxDegreeOfParallelism = databaseWriteParallelism,
             CancellationToken = cancellationToken
         });
 
@@ -45,7 +60,7 @@ public sealed class EventBatchEnvelopeWorkflow
     /// <summary>Gets the parallel envelope archive block.</summary>
     public TransformManyBlock<EventBatchEnvelope, CompressedEventLogBase> Archive { get; }
 
-    /// <summary>Gets the single-writer persistence block.</summary>
+    /// <summary>Gets the persistence block, serialized per device.</summary>
     public ActionBlock<CompressedEventLogBase> Save { get; }
 
     /// <summary>Sends an envelope into the workflow.</summary>

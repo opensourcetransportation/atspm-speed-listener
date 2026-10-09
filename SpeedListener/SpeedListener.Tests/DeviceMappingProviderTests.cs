@@ -13,44 +13,68 @@ namespace SpeedListener.Tests;
 public sealed class DeviceMappingProviderTests
 {
     [Fact]
+    public async Task GetMappingsAsync_SelectsCurrentVersionThenLowestSpeedDeviceId()
+    {
+        await using var services = CreateServices();
+        var old = Device(1, "old", DeviceTypes.SpeedSensor, "5026");
+        old.Location.Start = new DateTime(2020, 1, 1);
+        var current = Device(20, "unrelated-device-name", DeviceTypes.SpeedSensor, "5026");
+        current.Location.Start = new DateTime(2025, 1, 1);
+        var second = Device(30, "second", DeviceTypes.SpeedSensor, "5026");
+        second.Location = current.Location;
+        var controller = Device(2, "controller", DeviceTypes.SignalController, "5026");
+        controller.Location = current.Location;
+        var future = Device(40, "future", DeviceTypes.SpeedSensor, "5026");
+        future.Location.Start = new DateTime(2030, 1, 1);
+        var deleted = Device(50, "deleted", DeviceTypes.SpeedSensor, "5026");
+        deleted.Location.Start = new DateTime(2026, 1, 1);
+        deleted.Location.VersionAction = LocationVersionActions.Delete;
+        await SeedAsync(services, old, current, second, controller, future, deleted);
+
+        var mappings = await CreateProvider(services, timeProvider: new MutableTimeProvider())
+            .GetMappingsAsync(CancellationToken.None);
+
+        Assert.Equal(20, Assert.Single(mappings).Value.DeviceId);
+        Assert.Equal("5026", Assert.Single(mappings).Key);
+    }
+
+    [Fact]
+    public async Task GetMappingsAsync_CurrentVersionWithoutSpeedDevice_DoesNotUseOldVersion()
+    {
+        await using var services = CreateServices();
+        var old = Device(1, "old", DeviceTypes.SpeedSensor, "5026");
+        old.Location.Start = new DateTime(2020, 1, 1);
+        var current = Device(2, "controller", DeviceTypes.SignalController, "5026");
+        current.Location.Start = new DateTime(2025, 1, 1);
+        await SeedAsync(services, old, current, Device(3, "other", DeviceTypes.SpeedSensor, "5271"));
+        var mappings = await CreateProvider(services).GetMappingsAsync(CancellationToken.None);
+        Assert.False(mappings.ContainsKey("5026"));
+        Assert.True(mappings.ContainsKey("5271"));
+    }
+
+    [Fact]
     public async Task GetMappingsAsync_LoadsOnlyNormalizedSpeedSensorMappings()
     {
         await using var services = CreateServices();
         await SeedAsync(services,
-            Device(2, " camera ", DeviceTypes.AICamera, "L2"),
-            Device(1, " sensor-1 ", DeviceTypes.SpeedSensor, "L1"));
+            Device(2, " camera ", DeviceTypes.AICamera, "5271"),
+            Device(1, " sensor-1 ", DeviceTypes.SpeedSensor, "5026"));
         var provider = CreateProvider(services);
 
         var mappings = await provider.GetMappingsAsync(CancellationToken.None);
 
         var mapping = Assert.Single(mappings);
-        Assert.Equal("sensor-1", mapping.Key);
-        Assert.True(mappings.ContainsKey("SENSOR-1"));
+        Assert.Equal("5026", mapping.Key);
+        Assert.False(mappings.ContainsKey("sensor-1"));
         Assert.Equal(1, mapping.Value.DeviceId);
-        Assert.Equal("L1", mapping.Value.LocationIdentifier);
-    }
-
-    [Fact]
-    public async Task RefreshAsync_DuplicateNormalizedIdentifiers_KeepsLowestDeviceId()
-    {
-        await using var services = CreateServices();
-        await SeedAsync(services,
-            Device(2, "SENSOR-1", DeviceTypes.SpeedSensor, "L2"),
-            Device(1, " sensor-1 ", DeviceTypes.SpeedSensor, "L1"));
-        var provider = CreateProvider(services);
-
-        var mappings = await provider.GetMappingsAsync(CancellationToken.None);
-
-        var mapping = Assert.Single(mappings).Value;
-        Assert.Equal(1, mapping.DeviceId);
-        Assert.Equal("L1", mapping.LocationIdentifier);
+        Assert.Equal("5026", mapping.Value.LocationIdentifier);
     }
 
     [Fact]
     public async Task GetMappingsAsync_NoValidSpeedSensors_FailsInitialLoad()
     {
         await using var services = CreateServices();
-        await SeedAsync(services, Device(1, "camera", DeviceTypes.AICamera, "L1"));
+        await SeedAsync(services, Device(1, "camera", DeviceTypes.AICamera, "5026"));
         var metrics = new SpeedListenerMetrics(TimeProvider.System);
         var provider = CreateProvider(services, metrics);
 
@@ -65,7 +89,7 @@ public sealed class DeviceMappingProviderTests
     public async Task RefreshAsync_AfterSuccessfulLoad_RetainsLastMappingWhenDatabaseFails()
     {
         var services = CreateServices();
-        await SeedAsync(services, Device(1, "sensor-1", DeviceTypes.SpeedSensor, "L1"));
+        await SeedAsync(services, Device(1, "sensor-1", DeviceTypes.SpeedSensor, "5026"));
         var timeProvider = new MutableTimeProvider();
         var metrics = new SpeedListenerMetrics(timeProvider);
         var provider = CreateProvider(services, metrics, timeProvider);
@@ -77,7 +101,7 @@ public sealed class DeviceMappingProviderTests
         var retained = await provider.GetMappingsAsync(CancellationToken.None);
 
         Assert.Same(initial, retained);
-        Assert.Equal(1, retained["sensor-1"].DeviceId);
+        Assert.Equal(1, retained["5026"].DeviceId);
         Assert.Equal(2, metrics.MappingRefreshFailures);
     }
 

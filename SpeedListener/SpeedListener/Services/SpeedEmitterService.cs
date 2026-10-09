@@ -121,6 +121,7 @@ public class SpeedEmitterService : ISpeedEmitterService
     public byte[] CreateSpeedPacket(string sensorId, int mph, int kph)
     {
         var buffer = new byte[16];
+        Encoding.ASCII.GetBytes("Z00000XS").CopyTo(buffer, 0);
         buffer[8] = (byte)mph;
         buffer[9] = (byte)kph;
         var idFixed = (sensorId ?? string.Empty).PadRight(6)[..6];

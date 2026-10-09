@@ -45,6 +45,7 @@ format, for example `SpeedListenerConfiguration__UdpPort=10088`.
 | `ShutdownMaxWriteAttempts` | `1` | Attempts per publish while draining |
 | `DeviceMappingRefreshInterval` | `00:05:00` | ATSPM device-cache refresh interval |
 | `ArchiveParallelism` | `50` | Parallelism for envelope compression |
+| `DatabaseWriteParallelism` | `8` | Concurrent writers for different devices; writes to the same device remain serialized |
 | `WriteTimeout` | `00:00:30` | Database write-attempt timeout |
 | `MaxWriteAttempts` | `3` | Attempts for transient database failures |
 | `PoisonDeviceFailureThreshold` | `3` | Consecutive data-attributable drops before failing one device scope |
@@ -61,9 +62,32 @@ when event-source registration is available. Listener messages use source-genera
 
 ## Processing behavior
 
+Routing uses the first four characters of the packet detector identifier as the
+location identifier (for example, `502620` routes to `5026`). The current location
+version is the non-deleted version with the latest `Start` at or before the refresh
+time (UTC); equal dates use the highest location ID. Its lowest-ID SpeedSensor
+device is selected. Older versions are not used when the current version lacks a
+SpeedSensor. All channels at that location share the selected device; full detector
+identifiers remain in the stored events. DeviceIdentifier and sensor IP are not
+used for this lookup.
+
 The service reads the legacy packet layout used by the ATSPM Speed Listener pull
 request: MPH at byte 8, KPH at byte 9, a six-byte ASCII detector identifier at
-bytes 10-15, and an optional timestamp suffix. Parsed events are mapped to ATSPM
+bytes 10-15, and an optional timestamp suffix. Compact packets starting with `XS`
+omit the six-byte prefix: MPH is at byte 2, KPH at byte 3, and the six-digit
+detector identifier at bytes 4-9. Both formats use the receipt time unless a
+timestamp suffix is supplied. Compact packets with incomplete or nonnumeric
+detector identifiers are rejected. Prefixed messages require a `Z` plus five-digit
+sensor prefix followed by `XS`; both formats require six numeric detector digits
+for ATSPM routing. Untagged messages and unrelated protocols such as `Z4` are rejected.
+Messages joined within one UDP datagram are parsed individually at the documented
+`~\r\r` terminator, with individual invalid messages counted as rejections. A valid
+message followed by an incomplete message preserves the valid event and rejects
+the incomplete tail. Fragments are not reassembled across separate datagrams.
+Unexpected trailing data that is neither a terminator nor a valid timestamp is rejected.
+`Received` counts datagrams; `Parsed` counts queued events and `Rejected` counts
+invalid messages, so one datagram can produce multiple parsed or rejected records.
+Parsed events are mapped to ATSPM
 `SpeedSensor` devices, grouped by device, converted into hourly compressed event
 logs, and upserted through the packaged event-log repository.
 
@@ -74,6 +98,8 @@ listener against a production sensor stream and event-log database because the
 ATSPM upsert path is a read-modify-write operation.
 
 ## Build and test
+
+For Windows test-server installation, see [the Windows service guide](docs/windows-service.md).
 
 ```powershell
 dotnet test SpeedListener/SpeedListener.sln

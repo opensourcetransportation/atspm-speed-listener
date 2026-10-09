@@ -1,3 +1,13 @@
+<#
+.SYNOPSIS
+Temporarily transfers a specified UDP port to a candidate listener.
+.DESCRIPTION
+Requires the existing service name and target port. Restores original settings,
+firewall ports and service states after the test, including when testing fails.
+.EXAMPLE
+.\Test-ServiceSwitchover.ps1 -InstallPath 'D:\Apps\SpeedListener' -ExistingServiceName ExistingListener -CandidateServiceName RegionalSpeedListener -TargetPort 12000 -DurationSeconds 60
+#>
+
 #Requires -RunAsAdministrator
 [CmdletBinding()]
 param(

@@ -20,7 +20,10 @@ service's `ATSPM_SERVICE_NAME` environment variable so the host uses the matchin
 Windows service identity. The shared application event-log source remains
 `AtspmSpeedListener` in the `Atspm` log. Firewall rule names default to
 `<ServiceName>-UDP` and can be overridden. `LocalService` is the default installer
-account; upgrades and diagnostics preserve the registered identity. Paths, sample
+account; select another built-in account with `-ServiceAccount` or pass a dedicated
+account with `-Credential (Get-Credential)`. Provision dedicated accounts with the
+Log on as a service right through your organization's account policy. Upgrades and
+diagnostics preserve the registered identity. Paths, sample
 addresses and service names in examples are placeholders to replace for your agency.
 
 ## 1. Extract and check connectivity
@@ -31,10 +34,14 @@ Open PowerShell **as Administrator** on the test server. Adjust the ZIP path:
 Unblock-File C:\Temp\ATSPM-SpeedListener-win-x64.zip
 Expand-Archive C:\Temp\ATSPM-SpeedListener-win-x64.zip -DestinationPath C:\Services\ATSPM-SpeedListener-win-x64
 Set-Location C:\Services\ATSPM-SpeedListener-win-x64
-Test-NetConnection '<database-host>' -Port 5432
+$databaseHost = Read-Host 'Database host'
+$databasePort = [int](Read-Host 'Database TCP port')
+Test-NetConnection $databaseHost -Port $databasePort
 ```
 
-`TcpTestSucceeded` must be true. When using a direct Cloud SQL address, configure it in your deployment settings. The Windows server's outbound public IP must be permitted
+`TcpTestSucceeded` must be true. Use the port for your configured database engine
+(for example, PostgreSQL commonly uses TCP 5432). When using a direct Cloud SQL
+address, configure it in your deployment settings. The Windows server's outbound public IP must be permitted
 in Cloud SQL authorized networks, and its network must allow outbound TCP 5432.
 Use only the server's specific IP, not a broad public range. A VPN/private route or
 Cloud SQL Auth Proxy is an alternative, but requires changing the configured host.
@@ -44,7 +51,7 @@ Existing TLS connection options are preserved from the secrets.
 
 Replace the example sensor subnet with the actual sensor IP addresses or CIDR
 ranges. The installer restricts file access, registers the event source, creates
-the service under LocalService, and opens the configured UDP port only for the specified sources.
+the service under the selected account, and opens the configured UDP port only for the specified sources.
 
 ```powershell
 # Configure SpeedListenerConfiguration.UdpPort for your agency before installation.
@@ -74,7 +81,7 @@ these databases, and remember test packets become real event-log records.
 
 ## 3. Cloud Logging (optional)
 
-Database access uses the configured PostgreSQL credentials. Set
+Database access uses your configured database credentials. Set
 `Logging.Google.Enabled` to `false` if Cloud Logging is not configured.
 Windows Event Log includes listener summaries.
 
@@ -83,9 +90,9 @@ Credentials with `roles/logging.logWriter` in your GCP project, then set
 `Logging.Google.Enabled` to `true` in appsettings.json and restart the service.
 On Compute Engine, prefer the VM's attached service account with suitable scopes.
 For an external server, use your organization's workload identity setup. If using
-a credential file, keep it outside this package, grant LocalService read access,
+a credential file, keep it outside this package, grant the registered service account read access,
 and set `GOOGLE_APPLICATION_CREDENTIALS` for the service (not just your interactive
-PowerShell session). Your local gcloud login is not the LocalService identity.
+PowerShell session). Your interactive gcloud login does not configure the service's identity.
 
 ## Rejected-packet diagnostics
 
@@ -120,6 +127,8 @@ Omit `-SensorAddress` to include all sensors. `-Components nics` (the default)
 captures only network adapters; `all` includes additional Windows network
 components and may contain multiple appearances of the same packet. The script
 replaces pktmon filters and writes `.etl` and `.pcapng` files to the current user's temporary directory by default; use `-OutputDirectory` to choose another folder.
+Use `-FilterName` for a custom pktmon filter name and `-MaxFileSizeMB` to change the
+circular capture size (default 64 MB).
 
 ## Optional switchover test
 

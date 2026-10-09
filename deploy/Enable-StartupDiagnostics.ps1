@@ -1,3 +1,13 @@
+<#
+.SYNOPSIS
+Enables startup logging for the selected listener service.
+.DESCRIPTION
+Uses the registered service account and preserves its running or stopped state.
+LogPath defaults to startup-diagnostic.log in the supplied installation directory.
+.EXAMPLE
+.\Enable-StartupDiagnostics.ps1 -InstallPath 'D:\Apps\SpeedListener' -ServiceName RegionalSpeedListener -LogPath 'D:\Diagnostics\listener.log'
+#>
+
 #Requires -RunAsAdministrator
 [CmdletBinding()]
 param(

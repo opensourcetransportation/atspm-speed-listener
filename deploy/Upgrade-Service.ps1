@@ -1,3 +1,13 @@
+<#
+.SYNOPSIS
+Upgrades a selected listener from a complete Windows publish folder.
+.DESCRIPTION
+Preserves agency configuration, service identity, environment and firewall rules.
+Backs up runtime files and attempts rollback if copying or startup fails.
+.EXAMPLE
+.\Upgrade-Service.ps1 -SourcePath 'D:\Staging\SpeedListener' -InstallPath 'D:\Apps\SpeedListener' -ServiceName RegionalSpeedListener
+#>
+
 #Requires -RunAsAdministrator
 [CmdletBinding()]
 param(

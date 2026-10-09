@@ -100,6 +100,8 @@ ATSPM upsert path is a read-modify-write operation.
 ## Build and test
 
 For Windows test-server installation, see [the Windows service guide](docs/windows-service.md).
+The [deployment script reference](deploy/README.md) lists the configurable tools
+for installation, upgrades, diagnostics, packet capture and switchover testing.
 
 ```powershell
 dotnet test SpeedListener/SpeedListener.sln

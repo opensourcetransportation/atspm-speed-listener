@@ -1,0 +1,19 @@
+services:
+  speed-listener:
+    image: "${SPEED_LISTENER_IMAGE:-atspm-speed-listener:local}"
+    build:
+      context: ../SpeedListener
+      dockerfile: SpeedListener/Dockerfile
+    env_file:
+      - "${SPEED_LISTENER_ENV_FILE:?Set SPEED_LISTENER_ENV_FILE to your database configuration environment file}"
+    environment:
+      SpeedListenerConfiguration__UdpPort: "${SPEED_LISTENER_PORT:-10088}"
+    ports:
+      - "${SPEED_LISTENER_BIND_ADDRESS:-127.0.0.1}:${SPEED_LISTENER_PORT:-10088}:${SPEED_LISTENER_PORT:-10088}/udp"
+    stop_grace_period: 55s
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "${SPEED_LISTENER_LOG_MAX_SIZE:-10m}"
+        max-file: "${SPEED_LISTENER_LOG_MAX_FILES:-3}"

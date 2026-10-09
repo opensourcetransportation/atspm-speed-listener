@@ -1,0 +1,9 @@
+# Explicit troubleshooting override: retain every Debug record without rotation.
+# docker compose -f deploy/compose.yml -f deploy/compose.debug.yml up -d --build
+services:
+  speed-listener:
+    environment:
+      Logging__Console__LogLevel__SpeedListener: Debug
+    logging:
+      driver: json-file
+      options: !reset {}

@@ -7,6 +7,21 @@ on:
     branches: [ "main" ]
 
 jobs:
+  deployment-scripts:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        shell: [pwsh, powershell]
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+    - name: Test deployment scripts without controlling real services
+      shell: ${{ matrix.shell }}
+      run: |
+        ./deploy/tests/Upgrade-Service.Tests.ps1
+        ./deploy/tests/Test-ServiceSwitchover.Tests.ps1
+        ./deploy/tests/DeploymentOptions.Tests.ps1
+
   build-and-test:
     runs-on: ubuntu-latest
 

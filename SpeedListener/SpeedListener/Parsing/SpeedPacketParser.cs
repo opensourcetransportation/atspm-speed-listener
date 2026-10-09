@@ -73,9 +73,12 @@ public sealed class SpeedPacketParser(ILogger<SpeedPacketParser>? logger = null,
             return SpeedPacketParseResult.Failure("The speed packet must contain a six-digit detector identifier for ATSPM mapping.");
 
         var timestamp = datagram.ReceivedAt.UtcDateTime;
-        if (data.Length > timestampOffset)
+        var bodyLength = data.Length;
+        if (bodyLength >= 3 && data[bodyLength - 3] == (byte)'~' && data[bodyLength - 2] == 13 && data[bodyLength - 1] == 13)
+            bodyLength -= 3;
+        if (bodyLength > timestampOffset)
         {
-            var timestampText = Encoding.ASCII.GetString(data, timestampOffset, data.Length - timestampOffset)
+            var timestampText = Encoding.ASCII.GetString(data, timestampOffset, bodyLength - timestampOffset)
                 .TrimStart('~', '\r', '\n', '\0', ' ')
                 .TrimEnd('\r', '\n', '\0', ' ');
 

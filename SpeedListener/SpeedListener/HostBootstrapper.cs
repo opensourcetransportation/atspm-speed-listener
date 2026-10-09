@@ -25,6 +25,7 @@ using System.Runtime.Versioning;
 using System.Security;
 using SpeedListener.BackgroundServices;
 using SpeedListener.Configuration;
+using SpeedListener.LoadTesting;
 using SpeedListener.Parsing;
 using SpeedListener.Publishing;
 using SpeedListener.Receivers;
@@ -38,6 +39,21 @@ namespace SpeedListener;
 /// </summary>
 public static class HostBootstrapper
 {
+    /// <summary>Builds configuration-only services for generator discovery; starts no listener or writer.</summary>
+    public static IHost BuildGeneratorHost() => Host.CreateDefaultBuilder()
+        .UseContentRoot(AppContext.BaseDirectory)
+        .ApplyVolumeConfiguration(Path.Combine(AppContext.BaseDirectory, "Configuration"))
+        .ConfigureServices((hostContext, services) =>
+        {
+            services.AddOptions<SpeedListenerConfiguration>()
+                .Bind(hostContext.Configuration.GetSection(nameof(SpeedListenerConfiguration)));
+            services.AddSingleton(TimeProvider.System);
+            services.AddSingleton<SpeedListenerMetrics>();
+            services.AddAtspmDbContext(hostContext);
+            services.AddSingleton<IDeviceMappingProvider, DeviceMappingProvider>();
+            services.AddScoped<DatabaseSpeedTargetProvider>();
+        }).Build();
+
     /// <summary>Runs the speed listener host.</summary>
     public static async Task RunListenerHostAsync(Action<SpeedListenerConfiguration> configureAction)
     {

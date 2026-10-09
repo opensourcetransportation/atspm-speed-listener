@@ -20,7 +20,26 @@ Override the UDP port:
 dotnet run --project SpeedListener/SpeedListener -- listener --port 10088
 ```
 
-Generate sample packets with the test emitter:
+Discover current speed devices from the configuration database and generate one
+synthetic speed event per device per second for 60 seconds:
+
+```powershell
+.\SpeedListener.exe generate --host 127.0.0.1 --port 12000 --duration 60
+```
+
+Preview the target device IDs without sending packets:
+
+```powershell
+.\SpeedListener.exe generate --port 12000 --list-targets
+```
+
+Use your test listener's actual port. Configuration is read from the executable's
+directory and `Configuration/`, with the same database settings as the listener.
+The generator queries configuration only; UDP events sent to a listener can become
+real archived records. See [the load-testing guide](docs/load-testing.md) for rates,
+coverage, isolated tests and result interpretation.
+
+The older sample emitter is also available:
 
 ```powershell
 dotnet run --project SpeedListener/SpeedListener -- emitter --host 127.0.0.1 --port 10088

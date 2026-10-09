@@ -73,6 +73,7 @@ public class Program
         var rootCommand = new RootCommand("ATSPM Speed Listener Utility")
         {
             new EmmitterCommand(),
+            new GenerateCommand(),
             new ListenerCommand()
         };
 

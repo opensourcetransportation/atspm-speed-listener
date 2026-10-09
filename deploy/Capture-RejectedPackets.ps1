@@ -4,6 +4,7 @@ param(
     [string]$SensorAddress = '',
     [int]$Port = 10088,
     [ValidateRange(1,60)][int]$DurationSeconds = 60,
+    [ValidateSet('nics','all')][string]$Components = 'nics',
     [string]$OutputDirectory = 'C:\Temp'
 )
 $ErrorActionPreference = 'Stop'
@@ -28,7 +29,7 @@ if ($SensorAddress) { $filterArguments += @('-i', $SensorAddress) }
 Invoke-PacketMonitor -Arguments $filterArguments
 $captureStarted = $false
 try {
-    Invoke-PacketMonitor -Arguments @('start', '--capture', '--comp', 'nics', '--pkt-size', '0', '--file-size', '64', '--file-name', $etlPath)
+    Invoke-PacketMonitor -Arguments @('start', '--capture', '--comp', $Components, '--pkt-size', '0', '--file-size', '64', '--file-name', $etlPath)
     $captureStarted = $true
     Write-Host "Capturing full UDP packets on port $Port for $DurationSeconds seconds. Sensor filter: '$SensorAddress' (blank means all sensors)."
     Start-Sleep -Seconds $DurationSeconds

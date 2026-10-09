@@ -91,6 +91,18 @@ into the installation directory and run it as Administrator. It configures
 The diagnostic file is append-only and has no rotation; disable diagnostics after
 troubleshooting by removing that environment entry and restarting the service.
 
+For an optional packet capture without stopping services:
+
+```powershell
+.\deploy\Capture-RejectedPackets.ps1 -Port 10088 -DurationSeconds 60 `
+    -SensorAddress '10.168.5.24' -Components all
+```
+
+Omit `-SensorAddress` to include all sensors. `-Components nics` (the default)
+captures only network adapters; `all` includes additional Windows network
+components and may contain multiple appearances of the same packet. The script
+replaces pktmon filters and writes `.etl` and `.pcapng` files to `C:\Temp` by default.
+
 The deployment scripts also include an optional one-minute `Test-Port10088.ps1`
 takeover test. It temporarily stops the old `SpeedListener` service, moves the new
 listener to 10088, then restores the original settings and both services. Use it
@@ -121,9 +133,33 @@ same database settings and can write events if sensors are sending traffic.
 Connection failures usually mean network access, credentials, TLS configuration,
 or missing speed-sensor mappings. A zero mapping count prevents startup.
 
-For upgrades, stop the service, securely back up appsettings.json, replace binaries
-with the new publish output, restore the server's settings, and restart. Do not
-overwrite server credentials with a different deployment's settings.
+## Upgrade an existing service
+
+Extract a complete new Windows x64 publish package outside the installation folder,
+then run the reusable script as Administrator:
+
+```powershell
+.\deploy\Upgrade-Service.ps1 -SourcePath 'C:\Temp\ATSPM-SpeedListener-new' `
+    -InstallPath 'C:\Services\ATSPM-SpeedListener-win-x64'
+```
+
+The script validates that the registered executable belongs to the installation,
+stops only `AtspmSpeedListener` with a bounded graceful wait, and backs up every
+runtime file it will replace under `.upgrade-backups` inside the secured install
+folder. It upgrades executables, assemblies, symbols, and the dependency/runtime
+manifests, including nested satellite assemblies. It preserves all `appsettings*`
+files, the `Configuration` directory, logs, service identity, environment and
+firewall rules. Configure any newly required settings separately before upgrading.
+
+A previously running service is restarted and must own its configured UDP port.
+A previously stopped service remains stopped. If copying or startup fails, the
+script restores the previous runtime files, removes newly added runtime files,
+and attempts to restore the original service state. Rollback failures are reported
+with the backup path. No process is forcibly terminated, and the old legacy
+`SpeedListener` service is never stopped by this upgrade script.
+
+Retain backups until the upgraded service is verified; remove old backups later
+using your normal maintenance process.
 
 To remove service registration and its firewall rule (files remain):
 

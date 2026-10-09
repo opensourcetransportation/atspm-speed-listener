@@ -106,10 +106,10 @@ Enable Debug for the console category
 `Logging.Console.LogLevel.SpeedListener.BackgroundServices.SpeedListenerBackgroundService`
 (the full category is a single JSON property name in `LogLevel`). Rejections include
 the sender, reason, datagram length and up to 64 payload bytes as `PayloadHex`.
-Samples are limited to `RejectedPacketSamplesPerInterval` (default 10) per
-`SummaryInterval` (default one minute), shared across all sensors. Set the sample
-limit to zero to disable payload samples. The summary and loss warning still
-count every rejection. Successful packets do not produce per-packet logs.
+Every rejection is logged at Debug, without sampling or throttling. Information,
+Warning and Error have no per-packet payload output; the summary and aggregate
+loss warning count every rejection. Successful packets do not produce per-packet
+logs. `Truncated=True` identifies a payload longer than the 64-byte preview.
 `XS` speed messages with six numeric detector digits are supported, with or without
 the six-byte sensor prefix. Other headers, including the observed `X1` messages,
 are rejected rather than interpreted as speeds.
@@ -123,10 +123,12 @@ For console output from a Windows service, run as Administrator:
 It configures `ATSPM_STARTUP_LOG` for that service and grants the registered service
 account write access to the log. An optional `-LogPath` changes its location. The
 script preserves whether the service was running or stopped.
-The optional diagnostic capture is capped at 10 MiB. When the next write would
-exceed that limit, the same file is cleared and capture continues; older contents
-are discarded. An oversized existing file is cleared on opening. No backup files
-are created, so the service account needs no extra directory permissions. Use a
+The diagnostics helper defaults to an unlimited append-only capture so Debug
+records are retained. Set `-MaxFileSizeMB 1024` for a 1 GiB cap, or use
+`-MaxFileSizeMB 0` explicitly for no cap. It records the limit in the service's
+`ATSPM_STARTUP_LOG_MAX_BYTES` environment variable. If you set `ATSPM_STARTUP_LOG`
+directly without that limit variable, the default is 10 MiB. With a positive
+limit, older contents are cleared when full; no backups are created. Use a
 separate capture path for each process. Disable diagnostics after troubleshooting
 by removing that environment entry and restarting the service. Operational logs
 continue through the normal ATSPM logging providers.

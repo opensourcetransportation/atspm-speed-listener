@@ -70,7 +70,6 @@ format, for example `SpeedListenerConfiguration__UdpPort=10088`.
 | `MaxWriteAttempts` | `3` | Attempts for transient database failures |
 | `PoisonDeviceFailureThreshold` | `3` | Consecutive data-attributable drops before failing one device scope |
 | `SummaryInterval` | `00:01:00` | Structured summary and loss-warning interval |
-| `RejectedPacketSamplesPerInterval` | `10` | Maximum Debug rejection payload samples per summary interval; 0 disables |
 
 ATSPM `DatabaseConfiguration` settings configure the configuration and event-log
 databases through the NuGet-provided registration extensions. Do not commit
@@ -81,8 +80,9 @@ Google Cloud logging, ATSPM volume configuration, and the `Atspm` Windows Event 
 when event-source registration is available. Listener messages use source-generated
 `LoggerMessage` methods with stable event IDs.
 Normal listener logs default to Information and framework/ATSPM dependency logs
-to Warning. Packet payload diagnostics are sampled and Debug-only. Optional
-startup capture is capped at 10 MiB. See [logging and retention](docs/logging.md)
+to Warning. Every rejected packet is logged at Debug when enabled; normal levels
+have no packet payloads. Optional startup capture supports configurable limits
+or unlimited troubleshooting capture. See [logging and retention](docs/logging.md)
 for sink limits and Docker configuration.
 
 ## Processing behavior

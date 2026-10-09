@@ -39,8 +39,14 @@ public class Program
 
         var originalOutput = Console.Out;
         var originalError = Console.Error;
-        using var diagnosticWriter = new StreamWriter(new SizeLimitedDiagnosticStream(new FileStream(
-            diagnosticPath, FileMode.OpenOrCreate, FileAccess.Write, FileShare.ReadWrite))) { AutoFlush = true };
+        var limitText = Environment.GetEnvironmentVariable("ATSPM_STARTUP_LOG_MAX_BYTES");
+        var limit = string.IsNullOrWhiteSpace(limitText) ? SizeLimitedDiagnosticStream.DefaultMaxBytes
+            : long.Parse(limitText, System.Globalization.CultureInfo.InvariantCulture);
+        if (limit < 0) throw new ArgumentOutOfRangeException(nameof(limit), "Diagnostic size must be nonnegative; zero means unlimited.");
+        Stream diagnosticStream = new FileStream(diagnosticPath, FileMode.OpenOrCreate, FileAccess.Write, FileShare.ReadWrite);
+        if (limit == 0) diagnosticStream.Position = diagnosticStream.Length;
+        else diagnosticStream = new SizeLimitedDiagnosticStream(diagnosticStream, limit);
+        using var diagnosticWriter = new StreamWriter(diagnosticStream) { AutoFlush = true };
         var synchronizedWriter = TextWriter.Synchronized(diagnosticWriter);
         Console.SetOut(synchronizedWriter);
         Console.SetError(synchronizedWriter);

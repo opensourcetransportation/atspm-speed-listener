@@ -15,5 +15,5 @@ services:
     logging:
       driver: json-file
       options:
-        max-size: "10m"
-        max-file: "3"
+        max-size: "${SPEED_LISTENER_LOG_MAX_SIZE:-10m}"
+        max-file: "${SPEED_LISTENER_LOG_MAX_FILES:-3}"

@@ -4,8 +4,8 @@ Enables startup logging for the selected listener service.
 .DESCRIPTION
 Uses the registered service account and preserves its running or stopped state.
 LogPath defaults to startup-diagnostic.log in the supplied installation directory.
-The application caps this temporary capture at 10 MiB, clearing older contents
-when full. Normal operational logging continues through the ATSPM providers.
+MaxFileSizeMB defaults to zero, preserving the complete capture without a
+size cap. Normal operational logging continues through the ATSPM providers.
 .EXAMPLE
 .\Enable-StartupDiagnostics.ps1 -InstallPath 'D:\Apps\SpeedListener' -ServiceName RegionalSpeedListener -LogPath 'D:\Diagnostics\listener.log'
 #>
@@ -16,6 +16,7 @@ param(
     [Parameter(Mandatory = $true)][string]$InstallPath,
     [ValidatePattern('^[A-Za-z0-9_-]+$')][string]$ServiceName = 'AtspmSpeedListener',
     [string]$LogPath,
+    [ValidateRange(0,1048576)][int]$MaxFileSizeMB = 0,
     [ValidateRange(1,300)][int]$TimeoutSeconds = 60
 )
 $ErrorActionPreference = 'Stop'
@@ -44,8 +45,9 @@ if ($wasRunning) {
 try {
 $registryPath = "HKLM:\SYSTEM\CurrentControlSet\Services\$ServiceName"
 $existingEnvironment = @((Get-ItemProperty -LiteralPath $registryPath -Name Environment -ErrorAction SilentlyContinue).Environment)
-$newEnvironment = @($existingEnvironment | Where-Object { $_ -and $_ -notlike 'ATSPM_STARTUP_LOG=*' })
+$newEnvironment = @($existingEnvironment | Where-Object { $_ -and $_ -notlike 'ATSPM_STARTUP_LOG=*' -and $_ -notlike 'ATSPM_STARTUP_LOG_MAX_BYTES=*' })
 $newEnvironment += "ATSPM_STARTUP_LOG=$LogPath"
+$newEnvironment += "ATSPM_STARTUP_LOG_MAX_BYTES=$([long]$MaxFileSizeMB * 1MB)"
 New-ItemProperty -LiteralPath $registryPath -Name Environment -PropertyType MultiString -Value $newEnvironment -Force | Out-Null
 }
 finally {

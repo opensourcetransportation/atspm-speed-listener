@@ -1,7 +1,9 @@
 # Reusable deployment scripts
 
-For containers, `compose.yml` builds the listener and caps Docker logs at
-10m × 3 files. See [logging and Docker configuration](../docs/logging.md).
+For containers, `compose.yml` builds the listener and defaults Docker logs to
+10m × 3 files, with configurable limits for Debug capture. See
+[logging and Docker configuration](../docs/logging.md).
+Add `compose.debug.yml` for explicit Debug logging without log rotation.
 
 These are the maintained scripts for any agency deployment. They do not select a
 GCP project, database host, sensor IP, production port, or existing legacy service.

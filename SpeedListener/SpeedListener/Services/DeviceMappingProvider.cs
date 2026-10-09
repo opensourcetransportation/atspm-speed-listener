@@ -41,7 +41,9 @@ public sealed class DeviceMappingProvider(
 
             using var scope = scopeFactory.CreateScope();
             var context = scope.ServiceProvider.GetRequiredService<ConfigContext>();
-            var now = timeProvider.GetUtcNow().UtcDateTime;
+            // ATSPM stores location effective dates as timestamp without time zone.
+            // Preserve the UTC clock value while matching the database's DateTime kind.
+            var now = DateTime.SpecifyKind(timeProvider.GetUtcNow().UtcDateTime, DateTimeKind.Unspecified);
             var locations = await context.Locations
                 .AsNoTracking()
                 .Where(location => location.Start <= now)

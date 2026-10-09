@@ -10,6 +10,7 @@ namespace SpeedListener.Parsing;
 /// <summary>Parses legacy prefixed speed packets and compact packets beginning with XS.</summary>
 public sealed class SpeedPacketParser(IOptions<SpeedListenerConfiguration>? options = null) : ISpeedPacketParser
 {
+    private readonly IReadOnlyDictionary<string, string> _untaggedMappings = options?.Value.UntaggedSpeedDetectorMappings ?? new();
     private readonly TimeZoneInfo _eventTimeZone = TimeZoneInfo.FindSystemTimeZoneById(options?.Value.EventTimeZoneId ?? "UTC");
 
     /// <inheritdoc/>
@@ -45,12 +46,42 @@ public sealed class SpeedPacketParser(IOptions<SpeedListenerConfiguration>? opti
     private SpeedPacketParseResult ParseMessage(UdpDatagram datagram)
     {
         var data = datagram.Buffer;
+        // WX-501-0072 pp. 4-5: X1 + four hexadecimal digits + ~ CR CR.
+        // The Z0 prefix carries a four-digit multi-drop address, not a detector ID.
+        var multiDrop = data.Length >= 6 && data[0] == (byte)'Z' && data[1] == (byte)'0'
+            && data[2..6].All(b => b >= (byte)'0' && b <= (byte)'9');
+        var headerOffset = multiDrop ? 6 : 0;
+        if (data.Length >= headerOffset + 2 && data[headerOffset] == (byte)'X' && data[headerOffset + 1] == (byte)'1')
+        {
+            if (data.Length == headerOffset + 9 && data[^3] == (byte)'~' && data[^2] == 13 && data[^1] == 13
+                && data[(headerOffset + 2)..(headerOffset + 6)].All(b => b is >= 48 and <= 57 or >= 65 and <= 70 or >= 97 and <= 102)
+                && ushort.TryParse(Encoding.ASCII.GetString(data, headerOffset + 2, 4),
+                    NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out _))
+                return SpeedPacketParseResult.Actuation();
+            return SpeedPacketParseResult.Failure("Malformed X1 actuation message; expected four hexadecimal digits and ~ CR CR.");
+        }
         // Compact sensors omit the six-byte prefix before the XS header.
         // Identify that format explicitly; do not interpret arbitrary short packets as speed events.
         var compact = data.Length >= 2 && data[0] == (byte)'X' && data[1] == (byte)'S';
         var speedOffset = compact ? 2 : 8;
         var detectorOffset = speedOffset + 2;
         var timestampOffset = detectorOffset + 6;
+        // The documented basic XS message has two binary speed bytes and no tag.
+        // Resolve only an explicit endpoint mapping, never the multi-drop address.
+        var untagged = (compact || (multiDrop && data.Length >= 8 && data[6] == (byte)'X' && data[7] == (byte)'S'))
+            && data.Length == speedOffset + 5 && data[^3] == (byte)'~' && data[^2] == 13 && data[^1] == 13;
+        if (untagged)
+        {
+            if (!_untaggedMappings.TryGetValue(datagram.RemoteEndPoint.ToString() ?? string.Empty, out var mappedDetector))
+                return SpeedPacketParseResult.UnmappedSpeed();
+            if (mappedDetector.Length != 6 || mappedDetector.Any(c => c < '0' || c > '9'))
+                return SpeedPacketParseResult.Failure("Configured untagged speed detector identifier must contain six digits.");
+            return SpeedPacketParseResult.Success(new SpeedEvent
+            {
+                DetectorId = mappedDetector, Mph = data[speedOffset], Kph = data[speedOffset + 1],
+                Timestamp = ConvertTimestamp(datagram.ReceivedAt.UtcDateTime)
+            });
+        }
         if (data.Length < timestampOffset)
             return SpeedPacketParseResult.Failure($"Expected at least {timestampOffset} bytes but received {data.Length}.");
 
@@ -89,8 +120,9 @@ public sealed class SpeedPacketParser(IOptions<SpeedListenerConfiguration>? opti
             DetectorId = detectorId,
             Mph = data[speedOffset],
             Kph = data[speedOffset + 1],
-            Timestamp = _eventTimeZone.Equals(TimeZoneInfo.Utc) ? timestamp
-                : DateTime.SpecifyKind(TimeZoneInfo.ConvertTimeFromUtc(timestamp, _eventTimeZone), DateTimeKind.Unspecified)
+            Timestamp = ConvertTimestamp(timestamp)
         });
     }
+    private DateTime ConvertTimestamp(DateTime timestamp) => _eventTimeZone.Equals(TimeZoneInfo.Utc) ? timestamp
+        : DateTime.SpecifyKind(TimeZoneInfo.ConvertTimeFromUtc(timestamp, _eventTimeZone), DateTimeKind.Unspecified);
 }

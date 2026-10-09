@@ -4,6 +4,12 @@ namespace SpeedListener.Services;
 /// <summary>Thread-safe in-process counters used by structured summary logging.</summary>
 public sealed class SpeedListenerMetrics(TimeProvider timeProvider)
 {
+    private long _actuation, _unmappedSpeed;
+    public long Actuation => Interlocked.Read(ref _actuation);
+    public long UnmappedSpeed => Interlocked.Read(ref _unmappedSpeed);
+    public void RecordActuation() => Interlocked.Increment(ref _actuation);
+    public void RecordUnmappedSpeed() => Interlocked.Increment(ref _unmappedSpeed);
+
     private long _received, _parsed, _rejected, _unknown, _dropped;
     private long _batchesPublished, _envelopesPublished, _publishLatencyTicks;
     private long _retries, _publishFailures, _poisonBatches, _mappingRefreshFailures;

@@ -41,7 +41,16 @@ public sealed class SpeedListenerBackgroundService(
             metrics.RecordReceived();
             foreach (var result in parser.ParseMany(datagram))
             {
-                if (!result.IsSuccess)
+                if (result.IsActuation || result.IsUnmappedSpeed)
+                {
+                    if (result.IsActuation) metrics.RecordActuation();
+                    else metrics.RecordUnmappedSpeed();
+                    if (logger.IsEnabled(LogLevel.Debug))
+                        _log.NonSpeedPacket(datagram.RemoteEndPoint, result.IsActuation ? "X1Actuation" : "UnmappedSpeed",
+                            result.Error, datagram.Buffer.Length,
+                            Convert.ToHexString(datagram.Buffer.AsSpan(0, Math.Min(datagram.Buffer.Length, 64))), datagram.Buffer.Length > 64);
+                }
+                else if (!result.IsSuccess)
                 {
                     metrics.RecordRejected();
                     if (logger.IsEnabled(LogLevel.Debug))
@@ -119,7 +128,7 @@ public sealed class SpeedListenerBackgroundService(
         if (!stoppingToken.IsCancellationRequested)
             throw new InvalidOperationException("The UDP receiver stopped unexpectedly.");
 
-        _log.ListenerStopped(metrics.Received, metrics.Rejected, metrics.Dropped);
+        _log.ListenerStopped(metrics.Received, metrics.Rejected, metrics.Dropped, metrics.Parsed, metrics.Actuation, metrics.UnmappedSpeed);
         }
         finally
         {
@@ -131,7 +140,7 @@ public sealed class SpeedListenerBackgroundService(
     private async Task LogSummariesAsync(ChannelReader<SpeedEvent> reader, CancellationToken cancellationToken)
     {
         using var timer = new PeriodicTimer(options.Value.SummaryInterval);
-        long previousRejected = 0, previousUnknown = 0, previousDropped = 0;
+        long previousRejected = 0, previousUnknown = 0, previousDropped = 0, previousUnmappedSpeed = 0;
         while (await timer.WaitForNextTickAsync(cancellationToken))
         {
             var rejected = metrics.Rejected;
@@ -142,10 +151,13 @@ public sealed class SpeedListenerBackgroundService(
                 reader.CanCount ? reader.Count : -1, metrics.Dropped, metrics.BatchesPublished,
                 metrics.EnvelopesPublished, metrics.AveragePublishLatencyMilliseconds, metrics.Retries,
                 metrics.PublishFailures, metrics.PoisonBatches, metrics.MappingAge?.TotalSeconds ?? -1,
-                metrics.MappingRefreshFailures);
+                metrics.MappingRefreshFailures, metrics.Actuation, metrics.UnmappedSpeed);
             if (rejected > previousRejected || unknown > previousUnknown || dropped > previousDropped)
                 _log.LossSummary(
                     rejected - previousRejected, unknown - previousUnknown, dropped - previousDropped);
+            if (metrics.UnmappedSpeed > previousUnmappedSpeed)
+                _log.UnmappedSpeedSummary(metrics.UnmappedSpeed - previousUnmappedSpeed);
+            previousUnmappedSpeed = metrics.UnmappedSpeed;
             previousRejected = rejected;
             previousUnknown = unknown;
             previousDropped = dropped;

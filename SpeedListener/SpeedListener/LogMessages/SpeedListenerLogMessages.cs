@@ -25,18 +25,26 @@ public partial class SpeedListenerLogMessages(ILogger logger)
     public partial void ShutdownDrainTimeout(int remaining);
 
     [LoggerMessage(EventId = 3005, EventName = "Listener Stopped", Level = LogLevel.Information,
-        Message = "Speed listener stopped. Received {received}, rejected {rejected}, and dropped {dropped} packets")]
-    public partial void ListenerStopped(long received, long rejected, long dropped);
+        Message = "Speed listener stopped. Received={received} Parsed={parsed} Rejected={rejected} Dropped={dropped} Actuation={actuation} UnmappedSpeed={unmappedSpeed}")]
+    public partial void ListenerStopped(long received, long rejected, long dropped, long parsed, long actuation, long unmappedSpeed);
 
     [LoggerMessage(EventId = 3006, EventName = "Listener Summary", Level = LogLevel.Information,
-        Message = "SpeedListenerSummary Received={received} Parsed={parsed} Rejected={rejected} Unknown={unknown} ChannelDepth={channelDepth} Dropped={dropped} BatchesPublished={batchesPublished} EnvelopesPublished={envelopesPublished} PublishLatencyMs={publishLatencyMs} Retries={retries} PublishFailures={publishFailures} PoisonBatches={poisonBatches} MappingAgeSeconds={mappingAgeSeconds} MappingRefreshFailures={mappingRefreshFailures}")]
+        Message = "SpeedListenerSummary Received={received} Parsed={parsed} Rejected={rejected} Unknown={unknown} ChannelDepth={channelDepth} Dropped={dropped} BatchesPublished={batchesPublished} EnvelopesPublished={envelopesPublished} PublishLatencyMs={publishLatencyMs} Retries={retries} PublishFailures={publishFailures} PoisonBatches={poisonBatches} MappingAgeSeconds={mappingAgeSeconds} MappingRefreshFailures={mappingRefreshFailures} Actuation={actuation} UnmappedSpeed={unmappedSpeed}")]
     public partial void Summary(long received, long parsed, long rejected, long unknown, int channelDepth,
         long dropped, long batchesPublished, long envelopesPublished, double publishLatencyMs, long retries,
-        long publishFailures, long poisonBatches, double mappingAgeSeconds, long mappingRefreshFailures);
+        long publishFailures, long poisonBatches, double mappingAgeSeconds, long mappingRefreshFailures, long actuation, long unmappedSpeed);
 
     [LoggerMessage(EventId = 3007, EventName = "Listener Loss Summary", Level = LogLevel.Warning,
         Message = "SpeedListenerLossSummary RejectedSinceLast={rejectedSinceLast} UnknownSinceLast={unknownSinceLast} DroppedSinceLast={droppedSinceLast}")]
     public partial void LossSummary(long rejectedSinceLast, long unknownSinceLast, long droppedSinceLast);
+
+    [LoggerMessage(EventId = 3008, EventName = "Packet Classified", Level = LogLevel.Debug,
+        Message = "Classified packet from {remoteEndPoint} as {kind}: {reason} DatagramLength={datagramLength}; PayloadHex={payloadHex}; Truncated={truncated}")]
+    public partial void NonSpeedPacket(EndPoint remoteEndPoint, string kind, string? reason, int datagramLength, string payloadHex, bool truncated);
+
+    [LoggerMessage(EventId = 3009, EventName = "Unmapped Speed Summary", Level = LogLevel.Warning,
+        Message = "SpeedListenerMappingSummary UnmappedSpeedSinceLast={count}; configure UntaggedSpeedDetectorMappings for untagged XS source endpoints")]
+    public partial void UnmappedSpeedSummary(long count);
 
     [LoggerMessage(EventId = 3010, EventName = "Mappings Loaded", Level = LogLevel.Information,
         Message = "Loaded {count} speed-sensor device mappings; skipped {invalidCount} invalid and {duplicateCount} duplicate rows")]

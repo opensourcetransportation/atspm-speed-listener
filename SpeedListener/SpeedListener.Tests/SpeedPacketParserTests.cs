@@ -235,6 +235,80 @@ public sealed class SpeedPacketParserTests
         Assert.False(Assert.Single(_parser.ParseMany(Datagram(packet))).IsSuccess);
     }
 
+    [Theory]
+    [InlineData("Z01478X10001~\r\r")]
+    [InlineData("Z01396X10000~\r\r")]
+    [InlineData("X1000A~\r\r")]
+    public void Parse_DocumentedActuation_IsRecognizedWithoutSpeed(string text)
+    {
+        var result = _parser.Parse(Datagram(Encoding.ASCII.GetBytes(text)));
+        Assert.True(result.IsActuation);
+        Assert.False(result.IsSuccess);
+        Assert.False(result.IsUnmappedSpeed);
+        Assert.Null(result.Event);
+        Assert.Null(result.Error);
+    }
+
+    [Theory]
+    [InlineData("X1000G~\r\r")]
+    [InlineData("X10001")]
+    [InlineData("Z01478X100001~\r\r")]
+    [InlineData("ZA1478X10001~\r\r")]
+    [InlineData("X1 001~\r\r")]
+    public void Parse_MalformedActuation_RemainsRejected(string text)
+    {
+        var result = _parser.Parse(Datagram(Encoding.ASCII.GetBytes(text)));
+        Assert.False(result.IsActuation);
+        Assert.False(result.IsSuccess);
+        Assert.NotNull(result.Error);
+    }
+
+    [Theory]
+    [InlineData("585332507E0D0D")]
+    [InlineData("5A3031343738585332507E0D0D")]
+    public void Parse_UntaggedSpeed_RequiresExactEndpointAndUsesConfiguredTimeZone(string hex)
+    {
+        var packet = Datagram(Convert.FromHexString(hex));
+        Assert.True(_parser.Parse(packet).IsUnmappedSpeed);
+        var config = new SpeedListener.Configuration.SpeedListenerConfiguration
+        {
+            EventTimeZoneId = "America/Denver",
+            UntaggedSpeedDetectorMappings = new() { ["127.0.0.1:10088"] = "502620" }
+        };
+        var parser = new SpeedPacketParser(Microsoft.Extensions.Options.Options.Create(config));
+        var result = parser.Parse(packet);
+        Assert.True(result.IsSuccess);
+        Assert.Equal("502620", result.Event!.DetectorId);
+        Assert.Equal(50, result.Event.Mph);
+        Assert.Equal(80, result.Event.Kph);
+        Assert.Equal(12, result.Event.Timestamp.Hour);
+        Assert.Equal(DateTimeKind.Unspecified, result.Event.Timestamp.Kind);
+        Assert.True(parser.Parse(packet with { RemoteEndPoint = new IPEndPoint(IPAddress.Loopback, 10089) }).IsUnmappedSpeed);
+    }
+
+    [Fact]
+    public void ParseMany_ActuationThenSpeed_PreservesClassificationAndTaggedEvent()
+    {
+        var data = Encoding.ASCII.GetBytes("Z01478X10001~\r\r")
+            .Concat(Convert.FromHexString("585329423530323632307E0D0D")).ToArray();
+        var results = _parser.ParseMany(Datagram(data));
+        Assert.Equal(2, results.Count);
+        Assert.True(results[0].IsActuation);
+        Assert.Equal("502620", results[1].Event!.DetectorId);
+    }
+
+    [Fact]
+    public void Parse_Z4ContainingXS_IsStillRejectedEvenWithEndpointMapping()
+    {
+        var parser = new SpeedPacketParser(Microsoft.Extensions.Options.Options.Create(
+            new SpeedListener.Configuration.SpeedListenerConfiguration
+            { UntaggedSpeedDetectorMappings = new() { ["127.0.0.1:10088"] = "502620" } }));
+        var result = parser.Parse(Datagram(Convert.FromHexString("5A34FFFFFF0004050F0451000100006B585332507E0D0D")));
+        Assert.False(result.IsSuccess);
+        Assert.False(result.IsActuation);
+        Assert.False(result.IsUnmappedSpeed);
+    }
+
     private static byte[] Packet(string detectorId, byte mph, byte kph)
     {
         var packet = new byte[16];

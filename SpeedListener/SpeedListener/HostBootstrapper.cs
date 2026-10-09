@@ -124,6 +124,10 @@ public static class HostBootstrapper
         try { TimeZoneInfo.FindSystemTimeZoneById(configuration.EventTimeZoneId); }
         catch (Exception ex) when (ex is TimeZoneNotFoundException or InvalidTimeZoneException or ArgumentException)
         { return false; }
+        if (configuration.UntaggedSpeedDetectorMappings is null || configuration.UntaggedSpeedDetectorMappings.Any(pair =>
+            !System.Net.IPEndPoint.TryParse(pair.Key, out var endpoint) || endpoint.Port is <= 0 or > 65535 ||
+            pair.Value is null || pair.Value.Length != 6 || pair.Value.Any(c => c < '0' || c > '9')))
+            return false;
         if (configuration.UdpPort is <= 0 or > 65535 ||
             configuration.ChannelCapacity <= 0 ||
             configuration.BatchSize <= 0 ||

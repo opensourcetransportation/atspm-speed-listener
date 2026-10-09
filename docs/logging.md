@@ -36,7 +36,12 @@ Rejected-packet Debug records retain the sender, reason, datagram length and up 
 record when enabled, without sampling or throttling. `Truncated=True` identifies
 payloads longer than the 64-byte preview. Information, Warning and Error contain
 no per-packet payloads; counters and aggregate loss warnings include all rejected
-packets. Successful packets produce no per-packet logs. Debug volume can be much
+packets. Successful speed packets produce no per-packet logs. Recognized `X1` actuation
+and unconfigured basic `XS` messages produce Debug classification records (3008),
+including the same payload preview. Summaries include `Actuation` and `UnmappedSpeed`.
+Actuation is expected non-speed traffic and causes no loss warning. Unmapped basic
+speed messages produce one aggregate mapping warning per summary interval (3009),
+so valid speed data lacking a configured detector identity remains visible. Debug volume can be much
 larger than the healthy estimate; that is intentional to retain diagnostic records.
 
 ## Retention is per sink

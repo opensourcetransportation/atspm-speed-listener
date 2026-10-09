@@ -73,6 +73,20 @@ public sealed class HostBootstrapperTests
         Assert.False(HostBootstrapper.IsValidListenerConfiguration(configuration));
     }
 
+    [Theory]
+    [InlineData("sensor:2103", "502620", false)]
+    [InlineData("10.0.0.1:0", "502620", false)]
+    [InlineData("10.0.0.1:2103", "5026AA", false)]
+    [InlineData("10.0.0.1:2103", "50262", false)]
+    [InlineData("10.0.0.1:2103", "502620", true)]
+    [InlineData("[::1]:2103", "502620", true)]
+    public void IsValidListenerConfiguration_ValidatesUntaggedEndpointMapping(string endpoint, string detector, bool valid)
+    {
+        var config = ValidConfiguration();
+        config.UntaggedSpeedDetectorMappings[endpoint] = detector;
+        Assert.Equal(valid, HostBootstrapper.IsValidListenerConfiguration(config));
+    }
+
     private static SpeedListenerConfiguration ValidConfiguration() => new()
     {
         UdpPort = 10088,

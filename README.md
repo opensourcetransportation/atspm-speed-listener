@@ -58,6 +58,7 @@ format, for example `SpeedListenerConfiguration__UdpPort=10088`.
 | --- | ---: | --- |
 | `UdpPort` | `10088` | UDP bind port |
 | `EventTimeZoneId` | `UTC` | Time zone for stored events; set to the agency database's convention, for example `America/Denver` |
+| `UntaggedSpeedDetectorMappings` | `{}` | Explicit source IP:port to six-digit detector mapping for basic XS messages |
 | `ChannelCapacity` | `100000` | Maximum queued parsed events |
 | `BatchSize` | `5000` | Size-triggered flush threshold |
 | `FlushInterval` | `00:00:30` | Maximum age of a partial batch |
@@ -105,7 +106,12 @@ detector identifier at bytes 4-9. Both formats use the receipt time unless a
 timestamp suffix is supplied. Compact packets with incomplete or nonnumeric
 detector identifiers are rejected. Prefixed messages require a `Z` plus five-digit
 sensor prefix followed by `XS`; both formats require six numeric detector digits
-for ATSPM routing. Untagged messages and unrelated protocols such as `Z4` are rejected.
+for ATSPM routing. Basic untagged `XS` messages are accepted only with an explicit
+`UntaggedSpeedDetectorMappings` entry for the source IP and UDP port; otherwise they
+increment `UnmappedSpeed` rather than `Rejected`. Valid `X1` actuation messages
+(simple and `Z0` multi-drop) increment `Actuation` and emit no speed events. Binary
+`Z4` remains unsupported and rejected pending its protocol specification.
+See [supported Wavetronix protocols](docs/wavetronix-protocols.md) for configuration.
 Messages joined within one UDP datagram are parsed individually at the documented
 `~\r\r` terminator, with individual invalid messages counted as rejections. A valid
 message followed by an incomplete message preserves the valid event and rejects

@@ -48,7 +48,7 @@ public sealed class SpeedListenerBackgroundServiceTests
     }
 
     [Fact]
-    public async Task StopAsync_MultipleMessagesInDatagram_ArchivesEachAndCountsRejection()
+    public async Task StopAsync_MultipleMessagesInDatagram_ArchivesEachAndCountsUnmappedSpeed()
     {
         var receiver = new ControlledReceiver
         {
@@ -65,7 +65,8 @@ public sealed class SpeedListenerBackgroundServiceTests
 
         Assert.Equal(1, metrics.Received);
         Assert.Equal(2, metrics.Parsed);
-        Assert.Equal(1, metrics.Rejected);
+        Assert.Equal(0, metrics.Rejected);
+        Assert.Equal(1, metrics.UnmappedSpeed);
         var envelope = Assert.Single(Assert.Single(publisher.Batches));
         Assert.Equal(2, envelope.Items.Count());
     }
@@ -106,6 +107,35 @@ public sealed class SpeedListenerBackgroundServiceTests
             () => service.ExecuteTask!.WaitAsync(timeout.Token));
 
         Assert.Same(expected, actual);
+    }
+
+    [Theory]
+    [InlineData(LogLevel.Debug, 2)]
+    [InlineData(LogLevel.Information, 0)]
+    [InlineData(LogLevel.Warning, 0)]
+    public async Task ActuationAndUntaggedSpeed_AreCountedSeparatelyAndNotArchived(LogLevel level, int debugRecords)
+    {
+        var receiver = new ControlledReceiver
+        {
+            Payload = System.Text.Encoding.ASCII.GetBytes("Z01478X10001~\r\r")
+                .Concat(Convert.FromHexString("585332507E0D0D")).ToArray()
+        };
+        var publisher = new RecordingPublisher();
+        var metrics = new SpeedListenerMetrics(TimeProvider.System);
+        var logger = new RecordingLogger(level);
+        var service = CreateService(receiver, new StubMappingProvider(), publisher, new SpeedPacketParser(), metrics, logger);
+        await service.StartAsync(CancellationToken.None);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await receiver.DatagramDelivered.Task.WaitAsync(timeout.Token);
+        await service.StopAsync(timeout.Token);
+        Assert.Equal(1, metrics.Received);
+        Assert.Equal(1, metrics.Actuation);
+        Assert.Equal(1, metrics.UnmappedSpeed);
+        Assert.Equal(0, metrics.Parsed);
+        Assert.Equal(0, metrics.Rejected);
+        Assert.Empty(publisher.Batches);
+        Assert.Equal(debugRecords, logger.Events.Count(id => id == 3008));
+        Assert.DoesNotContain(3002, logger.Events);
     }
 
     private static SpeedListenerBackgroundService CreateService(

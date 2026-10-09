@@ -9,7 +9,7 @@ and the shared event-log source identify the product rather than an agency.
 | Script | Deployment inputs |
 | --- | --- |
 | `Install-Service.ps1` | Required install directory and sensor addresses; configurable service/display/firewall names; built-in service account or dedicated credentials; UDP port read from settings |
-| `Upgrade-Service.ps1` | Required source and install directories; configurable service name and shutdown/startup timeout; preserves installed settings, identity and firewall |
+| `Upgrade-Service.ps1` | Required source and install directories; configurable service name, timeout and expected port; observes a running service's effective UDP binding and preserves installed settings, identity and firewall |
 | `Enable-StartupDiagnostics.ps1` | Required install directory; configurable service name, log path and timeout; uses the registered account |
 | `Capture-RejectedPackets.ps1` | Required UDP port; optional sensor, duration, network components, output directory, filter name and capture size |
 | `Test-ServiceSwitchover.ps1` | Required install directory, existing service name and target port; configurable candidate service, duration, timeout, firewall rule and log path |

@@ -44,7 +44,7 @@ public sealed class DeviceMappingProvider(
             var now = timeProvider.GetUtcNow().UtcDateTime;
             var locations = await context.Locations
                 .AsNoTracking()
-                .Where(location => location.Start <= now && location.VersionAction != LocationVersionActions.Delete)
+                .Where(location => location.Start <= now)
                 .Select(location => new
                 {
                     location.Id, location.LocationIdentifier, location.Start, location.VersionAction,
@@ -67,12 +67,19 @@ public sealed class DeviceMappingProvider(
                 }
                 var current = versions.OrderByDescending(location => location.Start)
                     .ThenByDescending(location => location.Id).First();
+                // Historical versions are expected. Only tied effective dates are
+                // ambiguous; the highest ID remains the deterministic winner.
+                duplicateCount += versions.Count(location => location.Start == current.Start) - 1;
+                if (current.VersionAction == LocationVersionActions.Delete)
+                    continue;
                 if (!current.DeviceId.HasValue)
                     continue;
                 updated.Add(identifier, new DeviceMapping(current.DeviceId.Value, identifier));
             }
 
-            if (updated.Count == 0)
+            // Fail an unconfigured startup, but a successful refresh may legitimately
+            // remove every mapping. Retaining the old cache would resurrect deletions.
+            if (updated.Count == 0 && _mappings is null)
                 throw new InvalidOperationException(
                     $"No valid speed-sensor mappings were found ({invalidCount} invalid, {duplicateCount} duplicate rows).");
 
@@ -82,6 +89,10 @@ public sealed class DeviceMappingProvider(
             _log.MappingsLoaded(updated.Count, invalidCount, duplicateCount);
             if (invalidCount > 0 || duplicateCount > 0)
                 _log.MappingValidationWarning(invalidCount, duplicateCount);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex) when (_mappings is not null)
         {

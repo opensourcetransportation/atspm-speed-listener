@@ -62,7 +62,7 @@ public sealed class SpeedListenerBackgroundService(
 
             return ValueTask.CompletedTask;
         }, receiveCancellation.Token);
-        var consumer = batchProcessor.ProcessAsync(channel.Reader, processingCancellation.Token);
+        var consumer = batchProcessor.ProcessAsync(channel.Reader, processingCancellation.Token, stoppingToken);
 
         _log.ListenerStarted(options.Value.UdpPort);
         using var summaryCancellation = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);

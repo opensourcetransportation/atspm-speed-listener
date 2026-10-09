@@ -18,7 +18,7 @@ Two things change:
 1. **The Kafka, Pub/Sub, and HTTP Data API publish paths are removed.** Only the database path is migrated. There is consequently no API base URL, no ingest route, no TLS handling, and no authentication mechanism to configure.
 2. **Prototype lifecycle and reliability defects are corrected during the move.** These are enumerated in section 5 and are limited to defects that cause data loss, unbounded memory growth, or unobserved failures. They do not restructure the write path.
 
-Explicitly unchanged: the `EventBatchEnvelope` contract, `EventBatchEnvelopeWorkflow`, `ArchiveEnvelopeDataEvents`, the hourly compressed-log bucketing, and `IEventLogRepository.Upsert`. The read-decompress-union-recompress-write sequence is out of scope for this migration.
+The hourly compressed-log keys and read-decompress-union-recompress-write semantics are preserved. Following PR 2 review, envelopes retain typed event lists and a local cancellable EF writer replaces invocation of the tokenless packaged Upsert. See [the review resolution](pr-2-review-resolution.md).
 
 ## 2. Current state
 
@@ -69,7 +69,7 @@ Confirmed present in the pinned 5.3.1 packages and consumed rather than copied:
 | `IEventLogRepositoryExtensions.Upsert<T>` | `Utah.Udot.Atspm` |
 | `AddAtspmDbContext`, `AddAtspmEFConfigRepositories`, `AddAtspmEFEventLogRepositories` | `Utah.Udot.Atspm.Infrastructure` |
 
-The packaged `Upsert` extension preserves ATSPM's idempotent repository behavior. The save block itself is local because the packaged workflow abstraction does not expose persistence faults through its completion task; the listener must observe those faults to apply the failure policy. This does not require an ATSPM package change.
+The local `EfEventLogWriter` preserves the packaged `Upsert` extension's idempotent union behavior while passing cancellation tokens into EF reads and saves. The save block itself is local because the packaged workflow abstraction does not expose persistence faults through its completion task; the listener must observe those faults to apply the failure policy. This does not require an ATSPM package change.
 
 Confirmed **absent** from the packages and therefore listener-owned: `EventBatchEnvelope`, `IEventPublisher<T>`, `EventBatchEnvelopeWorkflow`, `ArchiveEnvelopeDataEvents`, `DatabaseEventPublisher`, `IUdpReceiver`, `UdpReceiver`, `RawSpeedPacketParser`, `SpeedBatchListenerBase`, `UDPSpeedBatchListener`, `EventListenerConfiguration`.
 
@@ -151,7 +151,7 @@ The pipeline shape is preserved. These specific behaviors are not, because each 
 
 **Unconditional TLS bypass.** `Program.cs` configures `DangerousAcceptAnyServerCertificateValidator` on the ingest HTTP client. The client is removed entirely with the API path, so this does not migrate.
 
-**Timestamp reinterpretation.** The parser's `DateTime.TryParse` plus `SpecifyKind(..., Utc)` can reinterpret values incorrectly. The implemented convention converts offset-bearing suffixes to UTC and uses the UDP receipt time in UTC when the suffix is absent or invalid. The host retains `Npgsql.EnableLegacyTimestampBehavior` because the ATSPM PostgreSQL model stores `DateTime` in `timestamp` columns. `DateTime` equality compares ticks rather than `Kind`, but captured production packets and a row-by-row comparison with `TransferSpeedEventsService` remain release gates before claiming wire compatibility.
+**Timestamp reinterpretation.** The parser's `DateTime.TryParse` plus `SpecifyKind(..., Utc)` can reinterpret values incorrectly. The implemented convention converts offset-bearing suffixes to UTC, uses UTC receipt time when the suffix is absent, and rejects invalid suffixes. `EventTimeZoneId` then selects the stored timestamp convention: UTC by default, or agency local wall-clock time for existing databases that require it. The host retains `Npgsql.EnableLegacyTimestampBehavior` because the ATSPM PostgreSQL model stores `DateTime` in `timestamp` columns. `DateTime` equality compares ticks rather than `Kind`, but captured production packets and a row-by-row comparison with `TransferSpeedEventsService` remain release gates before claiming wire compatibility.
 
 **Host shutdown budget.** The generic host's `ShutdownTimeout` defaults to five seconds and will terminate the process before a longer final flush completes. Configured from `ShutdownFlushTimeout`.
 

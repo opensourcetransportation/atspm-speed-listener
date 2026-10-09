@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Moq;
 using SpeedListener.Configuration;
 using SpeedListener.Services;
 using Utah.Udot.Atspm.Data;
@@ -27,7 +28,7 @@ public sealed class DeviceMappingProviderTests
         var future = Device(40, "future", DeviceTypes.SpeedSensor, "5026");
         future.Location.Start = new DateTime(2030, 1, 1);
         var deleted = Device(50, "deleted", DeviceTypes.SpeedSensor, "5026");
-        deleted.Location.Start = new DateTime(2026, 1, 1);
+        deleted.Location.Start = new DateTime(2021, 1, 1);
         deleted.Location.VersionAction = LocationVersionActions.Delete;
         await SeedAsync(services, old, current, second, controller, future, deleted);
 
@@ -36,6 +37,71 @@ public sealed class DeviceMappingProviderTests
 
         Assert.Equal(20, Assert.Single(mappings).Value.DeviceId);
         Assert.Equal("5026", Assert.Single(mappings).Key);
+    }
+
+    [Fact]
+    public async Task GetMappingsAsync_DeletionIsLatestVersion_DoesNotResurrectOldDevice()
+    {
+        await using var services = CreateServices();
+        var old = Device(1, "old", DeviceTypes.SpeedSensor, "5026");
+        old.Location.Start = new DateTime(2020, 1, 1);
+        var deleted = Device(2, "deleted", DeviceTypes.SpeedSensor, "5026");
+        deleted.Location.Start = new DateTime(2025, 1, 1);
+        deleted.Location.VersionAction = LocationVersionActions.Delete;
+        await SeedAsync(services, old, deleted, Device(3, "other", DeviceTypes.SpeedSensor, "5271"));
+        var mappings = await CreateProvider(services).GetMappingsAsync(CancellationToken.None);
+        Assert.False(mappings.ContainsKey("5026"));
+        Assert.True(mappings.ContainsKey("5271"));
+    }
+
+    [Fact]
+    public async Task RefreshAsync_LastLocationDeleted_ClearsCacheInsteadOfRetainingOldMapping()
+    {
+        await using var services = CreateServices();
+        var old = Device(1, "old", DeviceTypes.SpeedSensor, "5026");
+        old.Location.Start = new DateTime(2020, 1, 1);
+        await SeedAsync(services, old);
+        var clock = new MutableTimeProvider();
+        var metrics = new SpeedListenerMetrics(clock);
+        var provider = CreateProvider(services, metrics, clock);
+        Assert.Single(await provider.GetMappingsAsync(CancellationToken.None));
+        var deleted = Device(2, "deleted", DeviceTypes.SpeedSensor, "5026");
+        deleted.Location.Start = new DateTime(2025, 1, 1);
+        deleted.Location.VersionAction = LocationVersionActions.Delete;
+        await SeedAsync(services, deleted);
+        clock.Advance(TimeSpan.FromMinutes(6));
+        Assert.Empty(await provider.GetMappingsAsync(CancellationToken.None));
+        Assert.Equal(0, metrics.MappingRefreshFailures);
+    }
+
+    [Fact]
+    public async Task RefreshAsync_CancelledAfterLoad_PropagatesWithoutFailureMetric()
+    {
+        await using var services = CreateServices();
+        await SeedAsync(services, Device(1, "sensor", DeviceTypes.SpeedSensor, "5026"));
+        var clock = new MutableTimeProvider();
+        var metrics = new SpeedListenerMetrics(clock);
+        using var cancellation = new CancellationTokenSource();
+        var factory = new Mock<IServiceScopeFactory>();
+        factory.SetupSequence(value => value.CreateScope())
+            .Returns(() => services.CreateScope())
+            .Returns(() => { cancellation.Cancel(); throw new OperationCanceledException(cancellation.Token); });
+        var provider = new DeviceMappingProvider(factory.Object,
+            Options.Create(new SpeedListenerConfiguration()), clock, metrics, NullLogger<DeviceMappingProvider>.Instance);
+        await provider.GetMappingsAsync(CancellationToken.None);
+        clock.Advance(TimeSpan.FromMinutes(6));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => provider.RefreshAsync(cancellation.Token));
+        Assert.Equal(0, metrics.MappingRefreshFailures);
+    }
+
+    [Fact]
+    public async Task GetMappingsAsync_TiedCurrentDates_ReportsAmbiguousRows()
+    {
+        await using var services = CreateServices();
+        await SeedAsync(services, Device(1, "controller1", DeviceTypes.SignalController, "5026"),
+            Device(2, "controller2", DeviceTypes.SignalController, "5026"));
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => CreateProvider(services).GetMappingsAsync(CancellationToken.None));
+        Assert.Contains("1 duplicate", error.Message);
     }
 
     [Fact]

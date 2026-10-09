@@ -13,6 +13,8 @@ public sealed class SpeedListenerConfiguration
 {
     /// <summary>Gets or sets the UDP bind port.</summary>
     public int UdpPort { get; set; } = 10088;
+    /// <summary>Gets or sets the time zone used for stored ATSPM event timestamps.</summary>
+    public string EventTimeZoneId { get; set; } = "UTC";
     /// <summary>Gets or sets the maximum number of queued events.</summary>
     public int ChannelCapacity { get; set; } = 100_000;
     /// <summary>Gets or sets the size-triggered flush threshold.</summary>

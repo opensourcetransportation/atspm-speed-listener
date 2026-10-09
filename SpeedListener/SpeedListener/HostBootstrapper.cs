@@ -80,6 +80,7 @@ public static class HostBootstrapper
             services.AddAtspmDbContext(hostContext);
             services.AddAtspmEFConfigRepositories();
             services.AddAtspmEFEventLogRepositories();
+            services.AddScoped<IEventLogWriter, EfEventLogWriter>();
             services.AddSingleton<ISpeedPacketParser, SpeedPacketParser>();
             services.AddSingleton<IDeviceMappingProvider, DeviceMappingProvider>();
             services.AddSingleton<IEventPublisher<EventBatchEnvelope>, DatabaseEventPublisher>();
@@ -101,9 +102,12 @@ public static class HostBootstrapper
         await host.RunAsync();
     }
 
-    /// <summary>Validates listener settings, including the complete shutdown write-attempt budget.</summary>
+    /// <summary>Validates operational limits and room for at least one shutdown publish.</summary>
     public static bool IsValidListenerConfiguration(SpeedListenerConfiguration configuration)
     {
+        try { TimeZoneInfo.FindSystemTimeZoneById(configuration.EventTimeZoneId); }
+        catch (Exception ex) when (ex is TimeZoneNotFoundException or InvalidTimeZoneException or ArgumentException)
+        { return false; }
         if (configuration.UdpPort is <= 0 or > 65535 ||
             configuration.ChannelCapacity <= 0 ||
             configuration.BatchSize <= 0 ||
@@ -126,7 +130,13 @@ public static class HostBootstrapper
 
         var shutdownWriteBudget = TimeSpan.FromTicks(
             configuration.WriteTimeout.Ticks * configuration.ShutdownMaxWriteAttempts);
-        return configuration.ShutdownFlushTimeout > shutdownWriteBudget;
+        // This is a minimum, not a guarantee that all queued batches drain.
+        // The shared shutdown cancellation token bounds the complete backlog.
+        var retries = configuration.ShutdownMaxWriteAttempts - 1;
+        var exponentialRetries = Math.Min(retries, 8);
+        var retryDelayMilliseconds = 200 * (Math.Pow(2, exponentialRetries) - 1) + 100 * exponentialRetries
+            + (retries - exponentialRetries) * 30_100d;
+        return (configuration.ShutdownFlushTimeout - shutdownWriteBudget).TotalMilliseconds > retryDelayMilliseconds;
     }
 
     [SupportedOSPlatform("windows")]

@@ -38,10 +38,11 @@ format, for example `SpeedListenerConfiguration__UdpPort=10088`.
 | Setting | Default | Description |
 | --- | ---: | --- |
 | `UdpPort` | `10088` | UDP bind port |
+| `EventTimeZoneId` | `UTC` | Time zone for stored events; set to the agency database's convention, for example `America/Denver` |
 | `ChannelCapacity` | `100000` | Maximum queued parsed events |
 | `BatchSize` | `5000` | Size-triggered flush threshold |
 | `FlushInterval` | `00:00:30` | Maximum age of a partial batch |
-| `ShutdownFlushTimeout` | `00:00:45` | Drain deadline; must exceed `WriteTimeout * ShutdownMaxWriteAttempts` |
+| `ShutdownFlushTimeout` | `00:00:45` | Shared drain deadline; must allow one publish's attempts plus retry delays; a full backlog may not drain |
 | `ShutdownMaxWriteAttempts` | `1` | Attempts per publish while draining |
 | `DeviceMappingRefreshInterval` | `00:05:00` | ATSPM device-cache refresh interval |
 | `ArchiveParallelism` | `50` | Parallelism for envelope compression |
@@ -64,8 +65,9 @@ when event-source registration is available. Listener messages use source-genera
 
 Routing uses the first four characters of the packet detector identifier as the
 location identifier (for example, `502620` routes to `5026`). The current location
-version is the non-deleted version with the latest `Start` at or before the refresh
-time (UTC); equal dates use the highest location ID. Its lowest-ID SpeedSensor
+version has the latest `Start` at or before the refresh time (UTC). A current
+deletion suppresses the mapping; older versions are not resurrected. Equal dates
+use the highest location ID and count the remaining tied rows as duplicates. Its lowest-ID SpeedSensor
 device is selected. Older versions are not used when the current version lacks a
 SpeedSensor. All channels at that location share the selected device; full detector
 identifiers remain in the stored events. DeviceIdentifier and sensor IP are not
@@ -89,7 +91,18 @@ Unexpected trailing data that is neither a terminator nor a valid timestamp is r
 invalid messages, so one datagram can produce multiple parsed or rejected records.
 Parsed events are mapped to ATSPM
 `SpeedSensor` devices, grouped by device, converted into hourly compressed event
-logs, and upserted through the packaged event-log repository.
+logs, and upserted through cancellable EF operations using the packaged ATSPM
+context, models, primary keys and compression. The local writer preserves ATSPM's
+value-equality union because the packaged repository methods do not accept
+cancellation tokens. Successfully acknowledged hourly rows are skipped on retry;
+uncertain commits are safe to replay because value-equal events are deduplicated.
+
+Receipt and suffix timestamps are interpreted as instants in UTC, then converted
+to `EventTimeZoneId` for storage. UTC remains the default. For an agency database
+that stores local wall-clock times, configure its zone before ingesting data;
+non-UTC storage uses `DateTimeKind.Unspecified`. Match the existing database's
+convention, including its treatment of repeated hours when daylight saving ends.
+Changing the setting does not migrate existing records.
 
 The in-memory channel is bounded. When it is full, the newest event is dropped
 and counted in rate-limited summary logs. UDP itself is not reliable, and this release has no durable spool, so

@@ -10,5 +10,6 @@ public interface ISpeedEventBatchProcessor
     int InFlightEventCount { get; }
 
     /// <summary>Processes events until the channel completes or cancellation occurs.</summary>
-    Task ProcessAsync(ChannelReader<SpeedEvent> reader, CancellationToken cancellationToken);
+    Task ProcessAsync(ChannelReader<SpeedEvent> reader, CancellationToken cancellationToken,
+        CancellationToken shutdownToken = default);
 }

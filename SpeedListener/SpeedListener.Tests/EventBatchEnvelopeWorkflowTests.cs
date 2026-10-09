@@ -1,6 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
-using Newtonsoft.Json.Linq;
 using SpeedListener.Publishing;
 using SpeedListener.Workflows;
 using System.Collections.Concurrent;
@@ -31,7 +30,7 @@ public sealed class EventBatchEnvelopeWorkflowTests
             });
         repository.Setup(r => r.AddAsync(It.IsAny<CompressedEventLogBase>()))
             .Returns(() => { Interlocked.Decrement(ref active); Interlocked.Increment(ref saved); return Task.CompletedTask; });
-        using var services = new ServiceCollection().AddScoped(_ => repository.Object).BuildServiceProvider();
+        using var services = new ServiceCollection().AddScoped(_ => repository.Object).AddScoped<IEventLogWriter, PackagedTestEventLogWriter>().BuildServiceProvider();
         var workflow = new EventBatchEnvelopeWorkflow(services.GetRequiredService<IServiceScopeFactory>(),
             databaseWriteParallelism: 2);
         for (var device = 1; device <= 4; device++)
@@ -65,7 +64,7 @@ public sealed class EventBatchEnvelopeWorkflowTests
         }
         repository.Setup(r => r.AddAsync(It.IsAny<CompressedEventLogBase>())).Returns((CompressedEventLogBase row) => Save(row));
         repository.Setup(r => r.UpdateAsync(It.IsAny<CompressedEventLogBase>())).Returns((CompressedEventLogBase row) => Save(row));
-        using var services = new ServiceCollection().AddScoped(_ => repository.Object).BuildServiceProvider();
+        using var services = new ServiceCollection().AddScoped(_ => repository.Object).AddScoped<IEventLogWriter, PackagedTestEventLogWriter>().BuildServiceProvider();
         var workflow = new EventBatchEnvelopeWorkflow(services.GetRequiredService<IServiceScopeFactory>(),
             databaseWriteParallelism: 8);
         for (var index = 0; index < 20; index++)
@@ -82,7 +81,7 @@ public sealed class EventBatchEnvelopeWorkflowTests
         var expected = new InvalidOperationException("save failed");
         var repository = new Mock<IEventLogRepository>();
         repository.Setup(r => r.LookupAsync(It.IsAny<CompressedEventLogBase>())).ThrowsAsync(expected);
-        using var services = new ServiceCollection().AddScoped(_ => repository.Object).BuildServiceProvider();
+        using var services = new ServiceCollection().AddScoped(_ => repository.Object).AddScoped<IEventLogWriter, PackagedTestEventLogWriter>().BuildServiceProvider();
         var workflow = new EventBatchEnvelopeWorkflow(services.GetRequiredService<IServiceScopeFactory>(),
             databaseWriteParallelism: 8);
         await workflow.SendAsync(Envelope(1, "502620"));
@@ -97,7 +96,7 @@ public sealed class EventBatchEnvelopeWorkflowTests
         var timestamp = new DateTime(2026, 10, 7, 17, 0, 0, DateTimeKind.Utc);
         return new EventBatchEnvelope {
             DeviceId = deviceId, LocationIdentifier = detectorId[..4], Start = timestamp, End = timestamp,
-            DataType = nameof(SpeedEvent), Items = JToken.FromObject(new[] {
+            DataType = nameof(SpeedEvent), Items = (new[] {
                 new SpeedEvent { DetectorId = detectorId, Timestamp = timestamp, Mph = 30, Kph = 48 }
             })
         };

@@ -2,7 +2,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
-using Newtonsoft.Json.Linq;
 using SpeedListener.Configuration;
 using SpeedListener.Publishing;
 using SpeedListener.Services;
@@ -26,7 +25,7 @@ public sealed class DatabaseEventPublisherTests
             .Setup(instance => instance.AddAsync(It.IsAny<CompressedEventLogBase>()))
             .Returns(Task.CompletedTask);
         var services = new ServiceCollection()
-            .AddScoped(_ => repository.Object)
+            .AddScoped(_ => repository.Object).AddScoped<IEventLogWriter, PackagedTestEventLogWriter>()
             .BuildServiceProvider();
         var publisher = new DatabaseEventPublisher(
             services.GetRequiredService<IServiceScopeFactory>(),
@@ -46,7 +45,7 @@ public sealed class DatabaseEventPublisherTests
             DataType = nameof(SpeedEvent),
             Start = timestamp,
             End = timestamp,
-            Items = JToken.FromObject(new[]
+            Items = (new[]
             {
                 new SpeedEvent { DetectorId = "D1", Timestamp = timestamp, Mph = 30, Kph = 48 }
             })
@@ -137,6 +136,43 @@ public sealed class DatabaseEventPublisherTests
     }
 
     [Fact]
+    public async Task PublishAsync_PartialCommit_RetriesOnlyUnacknowledgedHourlyRow()
+    {
+        var repository = new Mock<IEventLogRepository>();
+        var secondLookups = 0;
+        repository.Setup(r => r.LookupAsync(It.IsAny<CompressedEventLogBase>()))
+            .Returns((CompressedEventLogBase row) => row.Start.Hour == 19 && Interlocked.Increment(ref secondLookups) == 1
+                ? Task.FromException<CompressedEventLogBase>(new FakeDbException("40001"))
+                : Task.FromResult<CompressedEventLogBase>(null!));
+        repository.Setup(r => r.AddAsync(It.IsAny<CompressedEventLogBase>())).Returns(Task.CompletedTask);
+        var envelope = CreateEnvelope();
+        envelope.Items = new[] { envelope.Items[0], new SpeedEvent
+        {
+            DetectorId = "D2", Timestamp = envelope.Start.AddHours(1), Mph = 31, Kph = 50
+        } };
+        var publisher = CreatePublisher(repository, maxAttempts: 2);
+        await publisher.PublishAsync(envelope);
+        repository.Verify(r => r.LookupAsync(It.Is<CompressedEventLogBase>(row => row.Start.Hour == 18)), Times.Once);
+        repository.Verify(r => r.LookupAsync(It.Is<CompressedEventLogBase>(row => row.Start.Hour == 19)), Times.Exactly(2));
+        repository.Verify(r => r.AddAsync(It.IsAny<CompressedEventLogBase>()), Times.Exactly(2));
+    }
+
+    [Fact]
+    public async Task PublishAsync_PoisonThresholdReached_StillArchivesLaterHealthyEnvelope()
+    {
+        var repository = new Mock<IEventLogRepository>();
+        repository.Setup(r => r.LookupAsync(It.IsAny<CompressedEventLogBase>()))
+            .Returns((CompressedEventLogBase row) => row.DeviceId == 1
+                ? Task.FromException<CompressedEventLogBase>(new FakeDbException("23505"))
+                : Task.FromResult<CompressedEventLogBase>(null!));
+        repository.Setup(r => r.AddAsync(It.IsAny<CompressedEventLogBase>())).Returns(Task.CompletedTask);
+        var publisher = CreatePublisher(repository, poisonThreshold: 1);
+        await Assert.ThrowsAsync<PoisonDeviceException>(() => publisher.PublishAsync(
+            [CreateEnvelope(), CreateEnvelope(2, "L2", "D2")], parallelism: 1));
+        repository.Verify(r => r.AddAsync(It.Is<CompressedEventLogBase>(row => row.DeviceId == 2)), Times.Once);
+    }
+
+    [Fact]
     public async Task PublishAsync_Success_ResetsConsecutivePoisonDropCount()
     {
         var repository = new Mock<IEventLogRepository>();
@@ -187,11 +223,12 @@ public sealed class DatabaseEventPublisherTests
     private static DatabaseEventPublisher CreatePublisher(Mock<IEventLogRepository> repository,
         int maxAttempts = 1, int poisonThreshold = 3)
     {
-        var services = new ServiceCollection().AddScoped(_ => repository.Object).BuildServiceProvider();
+        var services = new ServiceCollection().AddScoped(_ => repository.Object).AddScoped<IEventLogWriter, PackagedTestEventLogWriter>().BuildServiceProvider();
         return new DatabaseEventPublisher(services.GetRequiredService<IServiceScopeFactory>(),
             Options.Create(new SpeedListenerConfiguration
             {
                 ArchiveParallelism = 1,
+                DatabaseWriteParallelism = 1,
                 WriteTimeout = TimeSpan.FromSeconds(5),
                 MaxWriteAttempts = maxAttempts,
                 PoisonDeviceFailureThreshold = poisonThreshold
@@ -208,7 +245,7 @@ public sealed class DatabaseEventPublisherTests
         {
             LocationIdentifier = locationIdentifier, DeviceId = deviceId, DataType = nameof(SpeedEvent),
             Start = timestamp, End = timestamp,
-            Items = JToken.FromObject(new[] { new SpeedEvent { DetectorId = detectorId, Timestamp = timestamp, Mph = 30, Kph = 48 } })
+            Items = (new[] { new SpeedEvent { DetectorId = detectorId, Timestamp = timestamp, Mph = 30, Kph = 48 } })
         };
     }
 

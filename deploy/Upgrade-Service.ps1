@@ -4,6 +4,9 @@ Upgrades a selected listener from a complete Windows publish folder.
 .DESCRIPTION
 Preserves agency configuration, service identity, environment and firewall rules.
 Backs up runtime files and attempts rollback if copying or startup fails.
+.PARAMETER ExpectedPort
+Optional readiness port override. Otherwise a running service's effective UDP
+binding is used; a stopped service's port is read from appsettings.json.
 .EXAMPLE
 .\Upgrade-Service.ps1 -SourcePath 'D:\Staging\SpeedListener' -InstallPath 'D:\Apps\SpeedListener' -ServiceName RegionalSpeedListener
 #>
@@ -14,7 +17,8 @@ param(
     [Parameter(Mandatory = $true)][string]$SourcePath,
     [Parameter(Mandatory = $true)][string]$InstallPath,
     [ValidatePattern('^[A-Za-z0-9_-]+$')][string]$ServiceName = 'AtspmSpeedListener',
-    [ValidateRange(1,300)][int]$TimeoutSeconds = 60
+    [ValidateRange(1,300)][int]$TimeoutSeconds = 60,
+    [ValidateRange(1,65535)][int]$ExpectedPort
 )
 $ErrorActionPreference = 'Stop'
 $source = (Resolve-Path -LiteralPath $SourcePath).Path.TrimEnd('\')
@@ -34,8 +38,6 @@ if (Get-ChildItem -LiteralPath $source -Recurse -Force | Where-Object { $_.Attri
 }
 $settingsPath = Join-Path $install 'appsettings.json'
 $settings = Get-Content -LiteralPath $settingsPath -Raw | ConvertFrom-Json
-$port = [int]$settings.SpeedListenerConfiguration.UdpPort
-if ($port -lt 1 -or $port -gt 65535) { throw 'Installed UDP port is invalid.' }
 $registration = Get-CimInstance Win32_Service -Filter "Name='$ServiceName'"
 if (!$registration) { throw "Service $ServiceName is not installed." }
 $exePath = if ($registration.PathName -match '^"([^"]+)"') { $Matches[1] } else { ($registration.PathName -split '\s+')[0] }
@@ -45,6 +47,14 @@ if ([IO.Path]::GetFullPath($exePath) -ne (Join-Path $install 'SpeedListener.exe'
 $service = Get-Service -Name $ServiceName
 if ($service.Status -notin @('Running','Stopped')) { throw 'Wait for the service to finish starting or stopping before upgrading.' }
 $wasRunning = $service.Status -eq 'Running'
+$port = if ($ExpectedPort) { $ExpectedPort } elseif ($wasRunning) {
+    # Observe the effective binding, including environment, volume and CLI overrides.
+    $bindings = @(Get-NetUDPEndpoint -OwningProcess $registration.ProcessId -ErrorAction SilentlyContinue)
+    $ports = @($bindings.LocalPort | Sort-Object -Unique)
+    if ($ports.Count -ne 1) { throw 'Cannot determine one effective UDP port. Supply -ExpectedPort.' }
+    [int]$ports[0]
+} else { [int]$settings.SpeedListenerConfiguration.UdpPort }
+if ($port -lt 1 -or $port -gt 65535) { throw 'Installed UDP port is invalid. Supply -ExpectedPort for a configuration override.' }
 $timeout = [TimeSpan]::FromSeconds($TimeoutSeconds)
 
 # Copy runtime assets only. Preserve appsettings*, Configuration/, logs, service
@@ -99,7 +109,7 @@ if ((Test-Path -LiteralPath $backupRoot) -and
 }
 $backup = Join-Path $backupRoot ((Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + [Guid]::NewGuid().ToString('N'))
 $changed = [Collections.Generic.List[object]]::new()
-Write-Host "Upgrading only $ServiceName on configured UDP port $port."
+Write-Host "Upgrading only $ServiceName with readiness UDP port $port."
 Stop-UpgradeService
 try {
     New-Item -ItemType Directory -Path $backup -Force | Out-Null

@@ -57,9 +57,20 @@ public sealed class HostBootstrapperTests
         configuration.UdpPort = 65535;
         configuration.BatchSize = configuration.ChannelCapacity;
         configuration.ShutdownFlushTimeout = TimeSpan.FromTicks(
-            configuration.WriteTimeout.Ticks * configuration.ShutdownMaxWriteAttempts + 1);
+            configuration.WriteTimeout.Ticks * configuration.ShutdownMaxWriteAttempts + TimeSpan.FromMilliseconds(300).Ticks + 1);
 
         Assert.True(HostBootstrapper.IsValidListenerConfiguration(configuration));
+    }
+
+    [Fact]
+    public void IsValidListenerConfiguration_RejectsBudgetWithoutRetryDelayAndInvalidZone()
+    {
+        var configuration = ValidConfiguration();
+        configuration.ShutdownFlushTimeout = TimeSpan.FromSeconds(2.2);
+        Assert.False(HostBootstrapper.IsValidListenerConfiguration(configuration));
+        configuration.ShutdownFlushTimeout = TimeSpan.FromSeconds(3);
+        configuration.EventTimeZoneId = "not-a-time-zone";
+        Assert.False(HostBootstrapper.IsValidListenerConfiguration(configuration));
     }
 
     private static SpeedListenerConfiguration ValidConfiguration() => new()

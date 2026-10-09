@@ -1,6 +1,5 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Newtonsoft.Json.Linq;
 using SpeedListener.Configuration;
 using SpeedListener.LogMessages;
 using SpeedListener.Publishing;
@@ -25,7 +24,8 @@ public sealed class SpeedEventBatchProcessor(
     public int InFlightEventCount => Volatile.Read(ref _inFlightEventCount);
 
     /// <inheritdoc/>
-    public async Task ProcessAsync(ChannelReader<SpeedEvent> reader, CancellationToken cancellationToken)
+    public async Task ProcessAsync(ChannelReader<SpeedEvent> reader, CancellationToken cancellationToken,
+        CancellationToken shutdownToken = default)
     {
         var batch = new List<SpeedEvent>(options.Value.BatchSize);
         DateTimeOffset? batchStarted = null;
@@ -43,7 +43,7 @@ public sealed class SpeedEventBatchProcessor(
 
             if (batch.Count >= options.Value.BatchSize)
             {
-                await FlushAsync(batch, cancellationToken);
+                await FlushAsync(batch, cancellationToken, ShutdownAttempts());
                 batchStarted = null;
                 continue;
             }
@@ -54,7 +54,7 @@ public sealed class SpeedEventBatchProcessor(
             var remaining = options.Value.FlushInterval - elapsed;
             if (remaining <= TimeSpan.Zero)
             {
-                await FlushAsync(batch, cancellationToken);
+                await FlushAsync(batch, cancellationToken, ShutdownAttempts());
                 batchStarted = null;
                 continue;
             }
@@ -67,13 +67,15 @@ public sealed class SpeedEventBatchProcessor(
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
-                await FlushAsync(batch, cancellationToken);
+                await FlushAsync(batch, cancellationToken, ShutdownAttempts());
                 batchStarted = null;
             }
         }
 
         while (reader.TryRead(out var remainingEvent)) batch.Add(remainingEvent);
         await FlushAsync(batch, cancellationToken, options.Value.ShutdownMaxWriteAttempts);
+
+        int? ShutdownAttempts() => shutdownToken.IsCancellationRequested ? options.Value.ShutdownMaxWriteAttempts : null;
     }
 
     private async Task FlushAsync(List<SpeedEvent> batch, CancellationToken cancellationToken, int? maxAttempts = null)
@@ -106,7 +108,7 @@ public sealed class SpeedEventBatchProcessor(
                     End = events.Max(speedEvent => speedEvent.Timestamp),
                     LocationIdentifier = mapping.LocationIdentifier,
                     DeviceId = mapping.DeviceId,
-                    Items = JToken.FromObject(events)
+                    Items = events
                 });
             }
 

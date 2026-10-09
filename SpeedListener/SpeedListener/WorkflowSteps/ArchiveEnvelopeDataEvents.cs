@@ -1,6 +1,4 @@
-using Newtonsoft.Json.Linq;
 using SpeedListener.Publishing;
-using System.Collections;
 using Utah.Udot.Atspm.Data.Interfaces;
 using Utah.Udot.Atspm.Data.Models;
 using Utah.Udot.Atspm.Data.Models.EventLogModels;
@@ -16,8 +14,8 @@ public static class ArchiveEnvelopeDataEvents
         EventBatchEnvelope envelope,
         CancellationToken cancellationToken = default)
     {
-        var rawEvents = ((JArray)envelope.Items).ToObject<List<SpeedEvent>>() ?? [];
-        rawEvents.ForEach(speedEvent => speedEvent.LocationIdentifier = envelope.LocationIdentifier);
+        var rawEvents = envelope.Items;
+        foreach (var speedEvent in rawEvents) speedEvent.LocationIdentifier = envelope.LocationIdentifier;
 
         var groups = rawEvents.GroupBy(speedEvent => (
             speedEvent.LocationIdentifier,
@@ -25,26 +23,19 @@ public static class ArchiveEnvelopeDataEvents
             speedEvent.Timestamp.Month,
             speedEvent.Timestamp.Day,
             speedEvent.Timestamp.Hour,
-            DeviceId: envelope.DeviceId,
-            Type: speedEvent.GetType()));
+            DeviceId: envelope.DeviceId));
 
         foreach (var group in groups)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            dynamic list = Activator.CreateInstance(typeof(List<>).MakeGenericType(group.Key.Type))!;
-            foreach (var speedEvent in group)
-                ((IList)list).Add(speedEvent);
-
+            var list = group.ToList();
             var timeline = new Timeline<StartEndRange>(list, TimeSpan.FromHours(1));
-            dynamic compressed = Activator.CreateInstance(
-                typeof(CompressedEventLogs<>).MakeGenericType(group.Key.Type))!;
-            compressed.LocationIdentifier = group.Key.LocationIdentifier;
-            compressed.Start = timeline.Start;
-            compressed.End = timeline.End;
-            compressed.DataType = group.Key.Type;
-            compressed.DeviceId = group.Key.DeviceId;
-            compressed.Data = list;
-            yield return compressed;
+            yield return new CompressedEventLogs<SpeedEvent>
+            {
+                LocationIdentifier = group.Key.LocationIdentifier,
+                Start = timeline.Start, End = timeline.End,
+                DataType = typeof(SpeedEvent), DeviceId = group.Key.DeviceId, Data = list
+            };
         }
     }
 }

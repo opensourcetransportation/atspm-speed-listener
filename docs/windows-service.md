@@ -10,6 +10,11 @@ library validates all four database contexts; configure each required context an
 disable migrations for a listener-only deployment. Repository defaults do not
 contain deployment credentials.
 
+Set `SpeedListenerConfiguration.EventTimeZoneId` to match your existing event-log
+timestamps. It defaults to `UTC`; use a zone such as `America/Denver` for a database
+that stores that agency's local wall-clock time. Verify this choice before cutover;
+changing it does not convert existing records.
+
 If you include credentials in a deployment ZIP, restrict access to both the ZIP
 and installed directory. Keep credential-bearing packages out of source control.
 
@@ -195,7 +200,11 @@ manifests, including nested satellite assemblies. It preserves all `appsettings*
 files, the `Configuration` directory, logs, service identity, environment and
 firewall rules. Configure any newly required settings separately before upgrading.
 
-A previously running service is restarted and must own its configured UDP port.
+A previously running service is restarted and must own the effective UDP port
+observed before the upgrade, including environment, volume or command-line
+overrides. Supply `-ExpectedPort` when the service has multiple UDP bindings or you
+need an explicit readiness port. For a stopped service, the script reads the port
+from appsettings.json unless `-ExpectedPort` is supplied.
 A previously stopped service remains stopped. If copying or startup fails, the
 script restores the previous runtime files, removes newly added runtime files,
 and attempts to restore the original service state. Rollback failures are reported

@@ -4,14 +4,18 @@ using Microsoft.Extensions.Logging.Abstractions;
 using SpeedListener.LogMessages;
 using System.Globalization;
 using System.Text;
+using Microsoft.Extensions.Options;
+using SpeedListener.Configuration;
 using Utah.Udot.Atspm.Data.Models.EventLogModels;
 
 namespace SpeedListener.Parsing;
 
 /// <summary>Parses legacy prefixed speed packets and compact packets beginning with XS.</summary>
-public sealed class SpeedPacketParser(ILogger<SpeedPacketParser>? logger = null) : ISpeedPacketParser
+public sealed class SpeedPacketParser(ILogger<SpeedPacketParser>? logger = null,
+    IOptions<SpeedListenerConfiguration>? options = null) : ISpeedPacketParser
 {
     private readonly SpeedListenerLogMessages _log = new(logger ?? NullLogger<SpeedPacketParser>.Instance);
+    private readonly TimeZoneInfo _eventTimeZone = TimeZoneInfo.FindSystemTimeZoneById(options?.Value.EventTimeZoneId ?? "UTC");
 
     /// <inheritdoc/>
     public SpeedPacketParseResult Parse(UdpDatagram datagram)
@@ -89,7 +93,8 @@ public sealed class SpeedPacketParser(ILogger<SpeedPacketParser>? logger = null)
             DetectorId = detectorId,
             Mph = data[speedOffset],
             Kph = data[speedOffset + 1],
-            Timestamp = timestamp
+            Timestamp = _eventTimeZone.Equals(TimeZoneInfo.Utc) ? timestamp
+                : DateTime.SpecifyKind(TimeZoneInfo.ConvertTimeFromUtc(timestamp, _eventTimeZone), DateTimeKind.Unspecified)
         });
     }
 }

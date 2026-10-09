@@ -2,7 +2,7 @@
 
 This plan implements the architecture in [`speed-listener-design.md`](./speed-listener-design.md).
 
-It is a **migration, not a redesign**. The functional scope is what PR #217 does, minus the Kafka, Pub/Sub, and HTTP Data API publish paths. The envelope, the archive/save workflow, the hourly compressed-log bucketing, and `IEventLogRepository.Upsert` are carried across unchanged. The only behavioral corrections are the prototype lifecycle and reliability defects enumerated in design section 5.
+It is a **migration, not a redesign**. The functional scope is what PR #217 does, minus the Kafka, Pub/Sub, and HTTP Data API publish paths. The hourly compressed-log keys and union semantics are preserved. Following PR 2 review, envelopes use typed event lists and a local cancellable EF writer replaces the tokenless packaged Upsert call; see [the review resolution](pr-2-review-resolution.md). The only behavioral corrections are the prototype lifecycle and reliability defects enumerated in design section 5.
 
 Out of scope throughout: authentication, metrics instrumentation, health-check endpoints, and any change to the upsert or storage model.
 
@@ -65,7 +65,7 @@ The initial mapping load must contain at least one valid speed-sensor mapping. A
 
 - [ ] Move `EventBatchEnvelope` into this repository as a local type, preserving its field shape: `LocationIdentifier`, `DeviceId`, `DataType`, `Start`, `End`, `Items`.
 - [ ] Move `IEventPublisher<T>` as the publisher contract. Only the database implementation is migrated, but the interface is the seam the batch-processor tests use.
-- [x] Move `DatabaseEventPublisher`, `EventBatchEnvelopeWorkflow`, and `ArchiveEnvelopeDataEvents` into this repository. Keep the TPL Dataflow archive/save pipeline local and consume packaged `Upsert`; the local single-writer save block makes repository faults observable without changing the ATSPM package.
+- [x] Move `DatabaseEventPublisher`, `EventBatchEnvelopeWorkflow`, and `ArchiveEnvelopeDataEvents` into this repository. Keep the TPL Dataflow archive/save pipeline local and preserve packaged `Upsert` union semantics with cancellable EF operations; the local single-writer save block makes repository faults observable without changing the ATSPM package.
 - [ ] Do not migrate `HttpPublisher`, `KafkaPublisher`, `PubSubPublisher`, or the `IngestApi` HTTP client, and do not migrate `DangerousAcceptAnyServerCertificateValidator` with them.
 - [x] Replace `DatabaseEventPublisher.PublishAsync(IReadOnlyList<...>, ...)`'s catch-log-and-return with bounded retry for transient failures and propagation of all terminal failures. Retry is safe because `Upsert` is idempotent over value-equal events.
 - [x] Classify provider errors centrally. Isolate batch-data constraint failures to device envelopes and escalate repeated drops; fail immediately on schema or model mismatch.

@@ -211,6 +211,24 @@ public sealed class SpeedPacketParserTests
     }
 
     [Fact]
+    public void Parse_ConfiguredAgencyTimeZone_ConvertsReceiptAndOffsetSuffixToWallClock()
+    {
+        var parser = new SpeedPacketParser(options: Microsoft.Extensions.Options.Options.Create(
+            new SpeedListener.Configuration.SpeedListenerConfiguration { EventTimeZoneId = "America/Denver" }));
+        foreach (var (utc, hour) in new[] {
+            (new DateTimeOffset(2026, 1, 2, 18, 0, 0, TimeSpan.Zero), 11),
+            (new DateTimeOffset(2026, 7, 2, 18, 0, 0, TimeSpan.Zero), 12) })
+        {
+            var receipt = parser.Parse(new UdpDatagram(Packet("502620", 25, 40), Loopback(), utc));
+            Assert.Equal(hour, receipt.Event!.Timestamp.Hour);
+            Assert.Equal(DateTimeKind.Unspecified, receipt.Event.Timestamp.Kind);
+            var suffixed = Packet("502620", 25, 40).Concat(Encoding.ASCII.GetBytes("~" + utc.ToString("O"))).ToArray();
+            var explicitTime = parser.Parse(new UdpDatagram(suffixed, Loopback(), utc.AddDays(1)));
+            Assert.Equal(receipt.Event.Timestamp, explicitTime.Event!.Timestamp);
+        }
+    }
+
+    [Fact]
     public void ParseMany_JoinedWithoutTerminator_RejectsInsteadOfLosingSecondEvent()
     {
         var packet = Convert.FromHexString("58532942373235333132585329423732353331327E0D0D");

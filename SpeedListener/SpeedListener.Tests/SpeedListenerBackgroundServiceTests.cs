@@ -1,6 +1,5 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using Newtonsoft.Json.Linq;
 using SpeedListener.BackgroundServices;
 using SpeedListener.Configuration;
 using SpeedListener.Parsing;

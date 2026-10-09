@@ -29,7 +29,11 @@ function Start-Service {
 }
 function Get-NetUDPEndpoint {
     [CmdletBinding()]
-    param([int]$LocalPort)
+    param([int]$LocalPort, [int]$OwningProcess)
+    if ($OwningProcess) {
+        foreach ($boundPort in $script:observedPorts) { [pscustomobject]@{ OwningProcess = 42; LocalPort = $boundPort } }
+        return
+    }
     if ($LocalPort -ne $script:expectedPort) { throw 'Installed UDP port was changed.' }
     if ($script:failFirstBind -and $script:startCount -eq 1) { return }
     [pscustomobject]@{ OwningProcess = 42 }
@@ -46,6 +50,7 @@ function Assert-Equal($Expected, $Actual, [string]$Message) {
 }
 function New-Scenario([string]$Name, [string]$State = 'Running', [int]$Port = 15000, [string]$ServiceName = 'AtspmSpeedListener') {
     $script:expectedPort = $Port
+    $script:observedPorts = @($Port)
     $script:expectedServiceName = $ServiceName
     $script:originalSettings = '{"SpeedListenerConfiguration":{"UdpPort":' + $Port + '}}'
     $root = Join-Path $testRoot $Name
@@ -110,6 +115,24 @@ Assert-Equal 'Stopped' $script:fakeService.Status 'Stopped state preserved'
 Assert-Equal 0 $script:startCount 'Stopped service was not started'
 Assert-Preserved
 
+New-Scenario 'effective-port'
+$script:expectedPort = 26000
+$script:observedPorts = @(26000)
+& $upgrade -SourcePath $script:source -InstallPath $script:install -TimeoutSeconds 1
+Assert-Preserved
+Assert-Equal 'Running' $script:fakeService.Status 'Effective port used instead of appsettings port'
+
+New-Scenario 'explicit-port'
+$script:expectedPort = 27000
+$script:observedPorts = @(27000, 27001)
+& $upgrade -SourcePath $script:source -InstallPath $script:install -TimeoutSeconds 1 -ExpectedPort 27000
+Assert-Preserved
+
+New-Scenario 'ambiguous-port'
+$script:observedPorts = @(27000, 27001)
+Assert-UpgradeFails
+Assert-Equal 0 $script:stopCount 'Ambiguous port rejected before stopping'
+
 New-Scenario 'rollback'
 $script:failFirstStart = $true
 Assert-UpgradeFails
@@ -149,5 +172,5 @@ $script:source = $script:install
 Assert-UpgradeFails
 Assert-Equal 0 $script:stopCount 'Overlapping paths rejected before stopping'
 
-Write-Host 'PASS: nine upgrade scenarios. No real services were controlled.'
+Write-Host 'PASS: twelve upgrade scenarios. No real services were controlled.'
 Write-Host "Test files: $testRoot"

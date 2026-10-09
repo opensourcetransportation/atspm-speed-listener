@@ -1,5 +1,5 @@
-using Newtonsoft.Json.Linq;
 using System.ComponentModel.DataAnnotations;
+using Utah.Udot.Atspm.Data.Models.EventLogModels;
 
 namespace SpeedListener.Publishing;
 
@@ -21,7 +21,7 @@ public sealed class EventBatchEnvelope
     /// <summary>Gets or sets the latest event timestamp.</summary>
     [Required]
     public DateTime End { get; set; }
-    /// <summary>Gets or sets the serialized event collection.</summary>
+    /// <summary>Gets or sets the typed in-process event collection.</summary>
     [Required]
-    public JToken Items { get; set; } = default!;
+    public IReadOnlyList<SpeedEvent> Items { get; set; } = default!;
 }

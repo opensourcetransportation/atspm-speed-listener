@@ -24,7 +24,7 @@ public sealed class SpeedEventBatchProcessorTests
         Assert.Equal(1, envelope.DeviceId);
         Assert.Equal("5026", envelope.LocationIdentifier);
         Assert.Equal(new[] { "502620", "502618", "502622" },
-            envelope.Items.Select(item => (string?)item["DetectorId"]));
+            envelope.Items.Select(item => item.DetectorId));
     }
 
     [Theory]
@@ -123,6 +123,23 @@ public sealed class SpeedEventBatchProcessorTests
         Assert.Empty(publisher.Batches);
         Assert.Equal(1, metrics.Unknown);
         Assert.Equal(0, processor.InFlightEventCount);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_ShutdownBacklog_UsesShutdownAttemptBudgetForEveryBatch()
+    {
+        var publisher = new RecordingPublisher();
+        var processor = CreateProcessor(publisher, batchSize: 10);
+        var channel = Channel.CreateUnbounded<SpeedEvent>();
+        for (var index = 0; index < 25; index++)
+            channel.Writer.TryWrite(Event("502620", DateTime.UtcNow.AddSeconds(index), 30));
+        channel.Writer.Complete();
+        using var shutdown = new CancellationTokenSource();
+        shutdown.Cancel();
+        await processor.ProcessAsync(channel.Reader, CancellationToken.None, shutdown.Token);
+        Assert.Equal(3, publisher.Batches.Count);
+        Assert.All(publisher.AttemptBudgets, attempts => Assert.Equal(1, attempts));
+        Assert.Equal(25, publisher.Batches.Sum(batch => batch.Sum(envelope => envelope.Items.Count)));
     }
 
     [Fact]

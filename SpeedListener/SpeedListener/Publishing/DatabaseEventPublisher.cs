@@ -30,10 +30,11 @@ public sealed class DatabaseEventPublisher(
     {
         if (batch.Count == 0) return;
         var attemptBudget = maxAttempts ?? options.Value.MaxWriteAttempts;
+        var saved = new ConcurrentDictionary<(EventBatchEnvelope Envelope, DateTime Hour), byte>();
 
         try
         {
-            await PublishWithRetryAsync(batch, parallelism, attemptBudget, cancellationToken);
+            await PublishWithRetryAsync(batch, parallelism, attemptBudget, saved, cancellationToken);
             foreach (var envelope in batch) _consecutiveDeviceDrops.TryRemove(envelope.DeviceId, out _);
         }
         catch (Exception ex) when (DatabaseFailureClassifier.Classify(ex) == DatabaseFailureKind.BatchData)
@@ -45,23 +46,27 @@ public sealed class DatabaseEventPublisher(
             }
 
             _log.BatchRejected(batch.Count, ex);
+            PoisonDeviceException? thresholdFailure = null;
             foreach (var envelope in batch)
             {
                 try
                 {
-                    await PublishWithRetryAsync([envelope], parallelism, attemptBudget, cancellationToken);
+                    await PublishWithRetryAsync([envelope], parallelism, attemptBudget, saved, cancellationToken);
                     _consecutiveDeviceDrops.TryRemove(envelope.DeviceId, out _);
                 }
                 catch (Exception isolated) when (DatabaseFailureClassifier.Classify(isolated) == DatabaseFailureKind.BatchData)
                 {
-                    DropPoisonBatch(envelope, isolated);
+                    try { DropPoisonBatch(envelope, isolated); }
+                    catch (PoisonDeviceException threshold) { thresholdFailure ??= threshold; }
                 }
             }
+            if (thresholdFailure is not null) throw thresholdFailure;
         }
     }
 
     private async Task PublishWithRetryAsync(IReadOnlyList<EventBatchEnvelope> batch, int parallelism,
-        int maxAttempts, CancellationToken cancellationToken)
+        int maxAttempts, ConcurrentDictionary<(EventBatchEnvelope Envelope, DateTime Hour), byte> saved,
+        CancellationToken cancellationToken)
     {
         for (var attempt = 1; attempt <= maxAttempts; attempt++)
         {
@@ -70,7 +75,7 @@ public sealed class DatabaseEventPublisher(
             var started = Stopwatch.GetTimestamp();
             try
             {
-                await ExecuteWorkflowAsync(batch, parallelism, timeout.Token);
+                await ExecuteWorkflowAsync(batch, parallelism, saved, timeout.Token);
                 var latency = Stopwatch.GetElapsedTime(started);
                 metrics.RecordPublished(batch.Count, latency);
                 _log.EnvelopesArchived(batch.Count, latency.TotalMilliseconds);
@@ -83,7 +88,7 @@ public sealed class DatabaseEventPublisher(
             catch (Exception ex) when (attempt < maxAttempts && IsRetryable(ex, timeout, cancellationToken))
             {
                 metrics.RecordRetry();
-                var delay = TimeSpan.FromMilliseconds(200 * Math.Pow(2, attempt - 1) + Random.Shared.Next(0, 100));
+                var delay = TimeSpan.FromMilliseconds(Math.Min(200 * Math.Pow(2, attempt - 1), 30_000) + Random.Shared.Next(0, 100));
                 _log.DatabaseWriteRetry(attempt, delay, ex);
                 await Task.Delay(delay, cancellationToken);
             }
@@ -97,10 +102,13 @@ public sealed class DatabaseEventPublisher(
     }
 
     private async Task ExecuteWorkflowAsync(IReadOnlyList<EventBatchEnvelope> batch, int parallelism,
+        ConcurrentDictionary<(EventBatchEnvelope Envelope, DateTime Hour), byte> saved,
         CancellationToken cancellationToken)
     {
         var workflow = new EventBatchEnvelopeWorkflow(scopeFactory, parallelism, cancellationToken,
-            options.Value.DatabaseWriteParallelism);
+            options.Value.DatabaseWriteParallelism,
+            (envelope, row) => saved.ContainsKey((envelope, row.Start)),
+            (envelope, row) => saved.TryAdd((envelope, row.Start), 0));
         try
         {
             foreach (var envelope in batch)

@@ -12,17 +12,17 @@ New-Item -ItemType Directory -Path $testRoot | Out-Null
 
 function Get-Service {
     param([string]$Name)
-    if ($Name -ne 'AtspmSpeedListener') { throw 'Attempt to control another service.' }
+    if ($Name -ne $script:expectedServiceName) { throw 'Attempt to control another service.' }
     return $script:fakeService
 }
 function Get-CimInstance {
     param([string]$ClassName, [string]$Filter)
-    if ($Filter -ne "Name='AtspmSpeedListener'") { throw 'Unexpected service query.' }
+    if ($Filter -ne "Name='$script:expectedServiceName'") { throw 'Unexpected service query.' }
     [pscustomobject]@{ PathName = ('"{0}" listener' -f $script:registeredExe); State = $script:fakeService.Status; ProcessId = 42 }
 }
 function Start-Service {
     param([string]$Name)
-    if ($Name -ne 'AtspmSpeedListener') { throw 'Attempt to start another service.' }
+    if ($Name -ne $script:expectedServiceName) { throw 'Attempt to start another service.' }
     $script:startCount++
     if ($script:failFirstStart -and $script:startCount -eq 1) { throw 'Simulated startup failure.' }
     $script:fakeService.Status = 'Running'
@@ -30,7 +30,7 @@ function Start-Service {
 function Get-NetUDPEndpoint {
     [CmdletBinding()]
     param([int]$LocalPort)
-    if ($LocalPort -ne 10089) { throw 'Installed UDP port was changed.' }
+    if ($LocalPort -ne $script:expectedPort) { throw 'Installed UDP port was changed.' }
     if ($script:failFirstBind -and $script:startCount -eq 1) { return }
     [pscustomobject]@{ OwningProcess = 42 }
 }
@@ -44,7 +44,10 @@ function Copy-Item {
 function Assert-Equal($Expected, $Actual, [string]$Message) {
     if ($Expected -cne $Actual) { throw "Assertion failed: $Message" }
 }
-function New-Scenario([string]$Name, [string]$State = 'Running') {
+function New-Scenario([string]$Name, [string]$State = 'Running', [int]$Port = 15000, [string]$ServiceName = 'AtspmSpeedListener') {
+    $script:expectedPort = $Port
+    $script:expectedServiceName = $ServiceName
+    $script:originalSettings = '{"SpeedListenerConfiguration":{"UdpPort":' + $Port + '}}'
     $root = Join-Path $testRoot $Name
     $script:source = Join-Path $root 'source'
     $script:install = Join-Path $root 'installed'
@@ -55,7 +58,7 @@ function New-Scenario([string]$Name, [string]$State = 'Running') {
     }
     [IO.File]::WriteAllText((Join-Path $script:source 'NewDependency.dll'), 'new dependency')
     [IO.File]::WriteAllText((Join-Path $script:source 'appsettings.json'), 'must never replace installed settings')
-    [IO.File]::WriteAllText((Join-Path $script:install 'appsettings.json'), '{"SpeedListenerConfiguration":{"UdpPort":10089}}')
+    [IO.File]::WriteAllText((Join-Path $script:install 'appsettings.json'), $script:originalSettings)
     [IO.File]::WriteAllText((Join-Path $script:install 'startup-diagnostic.log'), 'preserve log')
     New-Item -ItemType Directory -Path (Join-Path $script:source 'Configuration'), (Join-Path $script:install 'Configuration') | Out-Null
     [IO.File]::WriteAllText((Join-Path $script:source 'Configuration\Custom.dll'), 'must not replace configuration')
@@ -76,7 +79,7 @@ function New-Scenario([string]$Name, [string]$State = 'Running') {
     $script:failCopy = $false
 }
 function Assert-Preserved {
-    Assert-Equal '{"SpeedListenerConfiguration":{"UdpPort":10089}}' ([IO.File]::ReadAllText((Join-Path $script:install 'appsettings.json'))) 'Settings preserved'
+    Assert-Equal $script:originalSettings ([IO.File]::ReadAllText((Join-Path $script:install 'appsettings.json'))) 'Settings preserved'
     Assert-Equal 'preserve log' ([IO.File]::ReadAllText((Join-Path $script:install 'startup-diagnostic.log'))) 'Log preserved'
     Assert-Equal 'preserve configuration' ([IO.File]::ReadAllText((Join-Path $script:install 'Configuration\Custom.dll'))) 'Configuration preserved'
 }
@@ -95,6 +98,11 @@ Assert-Equal 'satellite assembly' ([IO.File]::ReadAllText((Join-Path $script:ins
 Assert-Equal 'Running' $script:fakeService.Status 'Running state restored'
 $backup = Get-ChildItem -LiteralPath (Join-Path $script:install '.upgrade-backups') -Directory | Select-Object -First 1
 Assert-Equal 'old SpeedListener.dll' ([IO.File]::ReadAllText((Join-Path $backup.FullName 'SpeedListener.dll'))) 'Old DLL backed up'
+
+New-Scenario 'custom' 'Running' 25000 'RegionalSpeedListener'
+& $upgrade -SourcePath $script:source -InstallPath $script:install -ServiceName $script:expectedServiceName -TimeoutSeconds 1
+Assert-Preserved
+Assert-Equal 'Running' $script:fakeService.Status 'Custom service restarted'
 
 New-Scenario 'stopped' 'Stopped'
 & $upgrade -SourcePath $script:source -InstallPath $script:install -TimeoutSeconds 1
@@ -141,5 +149,5 @@ $script:source = $script:install
 Assert-UpgradeFails
 Assert-Equal 0 $script:stopCount 'Overlapping paths rejected before stopping'
 
-Write-Host 'PASS: eight upgrade scenarios. No real services were controlled.'
+Write-Host 'PASS: nine upgrade scenarios. No real services were controlled.'
 Write-Host "Test files: $testRoot"

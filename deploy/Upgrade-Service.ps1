@@ -2,7 +2,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][string]$SourcePath,
-    [string]$InstallPath = 'C:\Services\ATSPM-SpeedListener-win-x64',
+    [Parameter(Mandatory = $true)][string]$InstallPath,
     [ValidatePattern('^[A-Za-z0-9_-]+$')][string]$ServiceName = 'AtspmSpeedListener',
     [ValidateRange(1,300)][int]$TimeoutSeconds = 60
 )

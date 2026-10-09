@@ -46,7 +46,8 @@ public static class HostBootstrapper
         AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
         var builder = Host.CreateDefaultBuilder()
             .UseContentRoot(AppContext.BaseDirectory)
-            .UseWindowsService(options => options.ServiceName = "AtspmSpeedListener")
+            .UseWindowsService(options => options.ServiceName =
+                Environment.GetEnvironmentVariable("ATSPM_SERVICE_NAME") ?? "AtspmSpeedListener")
             // Services start in System32; the toolkit resolves relative paths
             // against the working directory, not the host's content root.
             .ApplyVolumeConfiguration(Microsoft.Extensions.Hosting.WindowsServices.WindowsServiceHelpers.IsWindowsService()

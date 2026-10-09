@@ -2,10 +2,10 @@
 [CmdletBinding()]
 param(
     [string]$SensorAddress = '',
-    [int]$Port = 10088,
+    [Parameter(Mandatory = $true)][ValidateRange(1,65535)][int]$Port,
     [ValidateRange(1,60)][int]$DurationSeconds = 60,
     [ValidateSet('nics','all')][string]$Components = 'nics',
-    [string]$OutputDirectory = 'C:\Temp'
+    [string]$OutputDirectory = [IO.Path]::GetTempPath()
 )
 $ErrorActionPreference = 'Stop'
 

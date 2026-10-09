@@ -1,4 +1,4 @@
-# Windows test server deployment
+# Windows service deployment
 
 The Windows x64 package is self-contained: no separate .NET installation is needed.
 Use Windows Server 2019, 2022, or 2025 x64. It includes native Windows service
@@ -12,6 +12,16 @@ contain deployment credentials.
 
 If you include credentials in a deployment ZIP, restrict access to both the ZIP
 and installed directory. Keep credential-bearing packages out of source control.
+
+Install paths are explicit parameters. Service names default to the application
+name `AtspmSpeedListener`, but can be changed with `-ServiceName`; use the same name
+for installation, upgrades and diagnostics. Installation records that name in the
+service's `ATSPM_SERVICE_NAME` environment variable so the host uses the matching
+Windows service identity. The shared application event-log source remains
+`AtspmSpeedListener` in the `Atspm` log. Firewall rule names default to
+`<ServiceName>-UDP` and can be overridden. `LocalService` is the default installer
+account; upgrades and diagnostics preserve the registered identity. Paths, sample
+addresses and service names in examples are placeholders to replace for your agency.
 
 ## 1. Extract and check connectivity
 
@@ -37,12 +47,14 @@ ranges. The installer restricts file access, registers the event source, creates
 the service under LocalService, and opens the configured UDP port only for the specified sources.
 
 ```powershell
-# Set SpeedListenerConfiguration.UdpPort to 10089 for testing alongside the old service.
-.\Install-Service.ps1 -SensorRemoteAddress '10.20.30.0/24'
+# Configure SpeedListenerConfiguration.UdpPort for your agency before installation.
+$installPath = 'C:\Services\ATSPM-SpeedListener-win-x64'
+.\Install-Service.ps1 -InstallPath $installPath -SensorRemoteAddress '192.0.2.0/24'
 Start-Service AtspmSpeedListener
 Start-Sleep -Seconds 10
 Get-Service AtspmSpeedListener
-Get-NetUDPEndpoint -LocalPort 10089
+$port = (Get-Content (Join-Path $installPath 'appsettings.json') -Raw | ConvertFrom-Json).SpeedListenerConfiguration.UdpPort
+Get-NetUDPEndpoint -LocalPort $port
 Get-WinEvent -FilterHashtable @{LogName='Atspm'; ProviderName='AtspmSpeedListener'} -MaxEvents 20 |
     Select-Object TimeCreated, LevelDisplayName, Message
 ```
@@ -50,7 +62,7 @@ Get-WinEvent -FilterHashtable @{LogName='Atspm'; ProviderName='AtspmSpeedListene
 If your organization's script policy blocks the installer, use its approved signing
 or execution process. The installer does not change execution policy.
 
-Point test sensors to the Windows server's address on the configured UDP port (10089 for a side-by-side test). Upstream firewalls
+Point test sensors to the Windows server's address on the configured UDP port. Upstream firewalls
 must also allow that traffic. A running service alone is not proof of readiness:
 look for loaded device mappings and the listener-started message, then increasing
 received/published counters in the minute summaries. The configuration database
@@ -85,28 +97,51 @@ the sender, reason, datagram length and up to 64 payload bytes as `PayloadHex`.
 the six-byte sensor prefix. Other headers, including the observed `X1` messages,
 are rejected rather than interpreted as speeds.
 
-For console output from a Windows service, copy `Enable-StartupDiagnostics.ps1`
-into the installation directory and run it as Administrator. It configures
-`ATSPM_STARTUP_LOG` for that service and grants LocalService write access to the log.
+For console output from a Windows service, run as Administrator:
+
+```powershell
+.\deploy\Enable-StartupDiagnostics.ps1 -InstallPath $installPath -ServiceName 'AtspmSpeedListener'
+```
+
+It configures `ATSPM_STARTUP_LOG` for that service and grants the registered service
+account write access to the log. An optional `-LogPath` changes its location. The
+script preserves whether the service was running or stopped.
 The diagnostic file is append-only and has no rotation; disable diagnostics after
 troubleshooting by removing that environment entry and restarting the service.
 
 For an optional packet capture without stopping services:
 
 ```powershell
-.\deploy\Capture-RejectedPackets.ps1 -Port 10088 -DurationSeconds 60 `
-    -SensorAddress '10.168.5.24' -Components all
+.\deploy\Capture-RejectedPackets.ps1 -Port $port -DurationSeconds 60 `
+    -SensorAddress '192.0.2.10' -Components all
 ```
 
 Omit `-SensorAddress` to include all sensors. `-Components nics` (the default)
 captures only network adapters; `all` includes additional Windows network
 components and may contain multiple appearances of the same packet. The script
-replaces pktmon filters and writes `.etl` and `.pcapng` files to `C:\Temp` by default.
+replaces pktmon filters and writes `.etl` and `.pcapng` files to the current user's temporary directory by default; use `-OutputDirectory` to choose another folder.
 
-The deployment scripts also include an optional one-minute `Test-Port10088.ps1`
-takeover test. It temporarily stops the old `SpeedListener` service, moves the new
-listener to 10088, then restores the original settings and both services. Use it
-only during an authorized test window. Normal installation does not run this test.
+## Optional switchover test
+
+`Test-ServiceSwitchover.ps1` temporarily transfers a UDP port from an existing
+Windows service to the candidate listener. Provide your agency's existing service
+name and port; neither is assumed. Example values below are placeholders:
+
+```powershell
+.\deploy\Test-ServiceSwitchover.ps1 -InstallPath $installPath `
+    -ExistingServiceName 'AgencyExistingListener' -CandidateServiceName 'AtspmSpeedListener' `
+    -TargetPort 12000 -DurationSeconds 60
+```
+
+The candidate's original port is read from its settings. The existing service must
+be running and own `TargetPort`, and the candidate must use a different port. The
+script validates the candidate executable path, temporarily updates only its UDP
+port and firewall port filter, and waits for the candidate to bind. It restores the
+original settings bytes, firewall port filter and both service states even if the
+test fails. If restoration cannot complete, it reports the errors. Other services
+are not stopped and no process is forcibly terminated. Use `-FirewallRuleName` for
+a rule with a custom name and `-LogPath` for a custom diagnostic log. Normal
+installation and upgrades never run this test automatically.
 
 ## Stop, troubleshoot, upgrade, remove
 
@@ -144,7 +179,7 @@ then run the reusable script as Administrator:
 ```
 
 The script validates that the registered executable belongs to the installation,
-stops only `AtspmSpeedListener` with a bounded graceful wait, and backs up every
+stops only the selected service (`-ServiceName`, default `AtspmSpeedListener`) with a bounded graceful wait, and backs up every
 runtime file it will replace under `.upgrade-backups` inside the secured install
 folder. It upgrades executables, assemblies, symbols, and the dependency/runtime
 manifests, including nested satellite assemblies. It preserves all `appsettings*`
@@ -155,8 +190,7 @@ A previously running service is restarted and must own its configured UDP port.
 A previously stopped service remains stopped. If copying or startup fails, the
 script restores the previous runtime files, removes newly added runtime files,
 and attempts to restore the original service state. Rollback failures are reported
-with the backup path. No process is forcibly terminated, and the old legacy
-`SpeedListener` service is never stopped by this upgrade script.
+with the backup path. No process is forcibly terminated, and unrelated services are never stopped by this upgrade script.
 
 Retain backups until the upgraded service is verified; remove old backups later
 using your normal maintenance process.

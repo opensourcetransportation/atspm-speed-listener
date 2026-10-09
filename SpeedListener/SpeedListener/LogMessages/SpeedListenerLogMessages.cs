@@ -13,8 +13,8 @@ public partial class SpeedListenerLogMessages(ILogger logger)
     public partial void UdpBound(int port);
 
     [LoggerMessage(EventId = 3002, EventName = "Packet Rejected", Level = LogLevel.Debug,
-        Message = "Rejected speed packet from {remoteEndPoint}: {reason}")]
-    public partial void PacketRejected(EndPoint remoteEndPoint, string? reason);
+        Message = "Rejected speed packet from {remoteEndPoint}: {reason} DatagramLength={datagramLength}; PayloadHex={payloadHex}; Truncated={truncated}")]
+    public partial void PacketRejected(EndPoint remoteEndPoint, string? reason, int datagramLength, string payloadHex, bool truncated);
 
     [LoggerMessage(EventId = 3003, EventName = "Listener Started", Level = LogLevel.Information,
         Message = "Speed listener started on UDP port {port}")]
@@ -49,10 +49,6 @@ public partial class SpeedListenerLogMessages(ILogger logger)
     [LoggerMessage(EventId = 3012, EventName = "Mapping Refresh Failed", Level = LogLevel.Warning,
         Message = "Device mapping refresh failed; continuing with the last successful mapping")]
     public partial void MappingRefreshFailed(Exception exception);
-
-    [LoggerMessage(EventId = 3020, EventName = "Packet Header Observed", Level = LogLevel.Debug,
-        Message = "Observed speed-packet header byte {headerByte}")]
-    public partial void HeaderObserved(byte headerByte);
 
     [LoggerMessage(EventId = 3030, EventName = "Batch Processed", Level = LogLevel.Information,
         Message = "Processed batch of {eventCount} events into {envelopeCount} envelopes")]

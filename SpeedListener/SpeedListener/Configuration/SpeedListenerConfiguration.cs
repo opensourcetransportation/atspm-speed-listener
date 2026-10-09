@@ -39,4 +39,6 @@ public sealed class SpeedListenerConfiguration
     public int PoisonDeviceFailureThreshold { get; set; } = 3;
     /// <summary>Gets or sets the interval between machine-parseable operational summaries.</summary>
     public TimeSpan SummaryInterval { get; set; } = TimeSpan.FromMinutes(1);
+    /// <summary>Gets or sets the maximum rejected-packet Debug samples per summary interval; zero disables samples.</summary>
+    public int RejectedPacketSamplesPerInterval { get; set; } = 10;
 }

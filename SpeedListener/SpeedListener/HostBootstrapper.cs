@@ -138,7 +138,8 @@ public static class HostBootstrapper
             configuration.DatabaseWriteParallelism <= 0 ||
             configuration.WriteTimeout <= TimeSpan.Zero ||
             configuration.PoisonDeviceFailureThreshold <= 0 ||
-            configuration.SummaryInterval <= TimeSpan.Zero)
+            configuration.SummaryInterval <= TimeSpan.Zero ||
+            configuration.RejectedPacketSamplesPerInterval < 0)
             return false;
 
         if (configuration.WriteTimeout.Ticks > TimeSpan.MaxValue.Ticks / configuration.ShutdownMaxWriteAttempts)

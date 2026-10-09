@@ -88,7 +88,8 @@ these databases, and remember test packets become real event-log records.
 
 Database access uses your configured database credentials. Set
 `Logging.Google.Enabled` to `false` if Cloud Logging is not configured.
-Windows Event Log includes listener summaries.
+Windows Event Log defaults to Warning and Error. To also include listener
+summaries, set `Logging.EventLog.LogLevel.SpeedListener` to `Information`.
 
 To also send logs to GCP, give the server's service identity Application Default
 Credentials with `roles/logging.logWriter` in your GCP project, then set
@@ -105,6 +106,10 @@ Enable Debug for the console category
 `Logging.Console.LogLevel.SpeedListener.BackgroundServices.SpeedListenerBackgroundService`
 (the full category is a single JSON property name in `LogLevel`). Rejections include
 the sender, reason, datagram length and up to 64 payload bytes as `PayloadHex`.
+Samples are limited to `RejectedPacketSamplesPerInterval` (default 10) per
+`SummaryInterval` (default one minute), shared across all sensors. Set the sample
+limit to zero to disable payload samples. The summary and loss warning still
+count every rejection. Successful packets do not produce per-packet logs.
 `XS` speed messages with six numeric detector digits are supported, with or without
 the six-byte sensor prefix. Other headers, including the observed `X1` messages,
 are rejected rather than interpreted as speeds.
@@ -118,8 +123,13 @@ For console output from a Windows service, run as Administrator:
 It configures `ATSPM_STARTUP_LOG` for that service and grants the registered service
 account write access to the log. An optional `-LogPath` changes its location. The
 script preserves whether the service was running or stopped.
-The diagnostic file is append-only and has no rotation; disable diagnostics after
-troubleshooting by removing that environment entry and restarting the service.
+The optional diagnostic capture is capped at 10 MiB. When the next write would
+exceed that limit, the same file is cleared and capture continues; older contents
+are discarded. An oversized existing file is cleared on opening. No backup files
+are created, so the service account needs no extra directory permissions. Use a
+separate capture path for each process. Disable diagnostics after troubleshooting
+by removing that environment entry and restarting the service. Operational logs
+continue through the normal ATSPM logging providers.
 
 For an optional packet capture without stopping services:
 

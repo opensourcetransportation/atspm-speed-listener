@@ -354,9 +354,14 @@ Observability is **structured logging only**. No metrics instrumentation, export
 
 The host follows ATSPM EventLogUtility conventions: apply volume configuration, register Google Cloud logging, and use the `Atspm` Windows Event Log when the process can access or register its event source. A non-elevated Windows development process skips that sink rather than failing listener startup. Listener-owned messages use source-generated `LoggerMessage` methods with stable event IDs.
 
-Use structured logs with event IDs for startup, bind success/failure, packet rejection, unknown sensor, mapping refresh, batch flush, publish retry/failure, and shutdown result. Never log credentials, connection strings, or full raw packets.
+Use structured logs with event IDs for startup, bind success/failure, packet rejection, unknown sensor, mapping refresh, batch flush, publish retry/failure, and shutdown result. Never log credentials or connection strings. Raw payload previews require Debug diagnostics, are capped at 64 bytes and are sampled at most `RejectedPacketSamplesPerInterval` times per summary interval. Successful packets produce no per-packet logs.
 
 Emit a periodic summary log carrying at minimum datagrams received, packets parsed and rejected, unknown-sensor events, channel depth and dropped events, batches and envelopes published, publish latency, retries and failures, and mapping age and refresh failures. The shadow-mode comparison in section 12 depends on these, so the summary must be machine-parseable.
+
+Keep the optional startup capture bounded at 10 MiB and configure retention for
+every operational sink independently. The Docker deployment uses 10m × 3 files;
+Windows Event Log and Cloud Logging retain their administrator-managed policies.
+See [logging and retention](logging.md) for the measured volume review.
 
 ### 10.1 Health checks
 

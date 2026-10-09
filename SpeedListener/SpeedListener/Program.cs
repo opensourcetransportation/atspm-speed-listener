@@ -16,6 +16,7 @@
 #endregion
 
 using SpeedListener.Commands;
+using SpeedListener.Diagnostics;
 using System.CommandLine;
 
 namespace SpeedListener;
@@ -38,8 +39,8 @@ public class Program
 
         var originalOutput = Console.Out;
         var originalError = Console.Error;
-        using var diagnosticWriter = new StreamWriter(new FileStream(
-            diagnosticPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite)) { AutoFlush = true };
+        using var diagnosticWriter = new StreamWriter(new SizeLimitedDiagnosticStream(new FileStream(
+            diagnosticPath, FileMode.OpenOrCreate, FileAccess.Write, FileShare.ReadWrite))) { AutoFlush = true };
         var synchronizedWriter = TextWriter.Synchronized(diagnosticWriter);
         Console.SetOut(synchronizedWriter);
         Console.SetError(synchronizedWriter);

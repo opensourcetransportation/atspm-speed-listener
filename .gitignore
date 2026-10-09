@@ -92,6 +92,7 @@ appsettings.*.json
 
 # Secret files
 secrets.json
+*.env
 
 # Certificates and keys
 *.pfx

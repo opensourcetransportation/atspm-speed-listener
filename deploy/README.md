@@ -1,5 +1,8 @@
 # Reusable deployment scripts
 
+For containers, `compose.yml` builds the listener and caps Docker logs at
+10m × 3 files. See [logging and Docker configuration](../docs/logging.md).
+
 These are the maintained scripts for any agency deployment. They do not select a
 GCP project, database host, sensor IP, production port, or existing legacy service.
 Configure database and optional cloud logging settings through your agency's

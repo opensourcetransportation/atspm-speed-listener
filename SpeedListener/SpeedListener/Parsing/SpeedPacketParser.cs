@@ -1,7 +1,4 @@
 using SpeedListener.Receivers;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
-using SpeedListener.LogMessages;
 using System.Globalization;
 using System.Text;
 using Microsoft.Extensions.Options;
@@ -11,10 +8,8 @@ using Utah.Udot.Atspm.Data.Models.EventLogModels;
 namespace SpeedListener.Parsing;
 
 /// <summary>Parses legacy prefixed speed packets and compact packets beginning with XS.</summary>
-public sealed class SpeedPacketParser(ILogger<SpeedPacketParser>? logger = null,
-    IOptions<SpeedListenerConfiguration>? options = null) : ISpeedPacketParser
+public sealed class SpeedPacketParser(IOptions<SpeedListenerConfiguration>? options = null) : ISpeedPacketParser
 {
-    private readonly SpeedListenerLogMessages _log = new(logger ?? NullLogger<SpeedPacketParser>.Instance);
     private readonly TimeZoneInfo _eventTimeZone = TimeZoneInfo.FindSystemTimeZoneById(options?.Value.EventTimeZoneId ?? "UTC");
 
     /// <inheritdoc/>
@@ -63,8 +58,6 @@ public sealed class SpeedPacketParser(ILogger<SpeedPacketParser>? logger = null,
             data[1..6].Any(b => b < (byte)'0' || b > (byte)'9') ||
             data[6] != (byte)'X' || data[7] != (byte)'S'))
             return SpeedPacketParseResult.Failure("Unsupported packet header; expected XS or Z plus five digits followed by XS.");
-
-        _log.HeaderObserved(data[speedOffset - 1]);
 
         var detectorId = Encoding.ASCII.GetString(data, detectorOffset, 6).Trim();
         if (string.IsNullOrWhiteSpace(detectorId))

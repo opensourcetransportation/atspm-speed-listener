@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using SpeedListener.BackgroundServices;
 using SpeedListener.Configuration;
@@ -14,6 +15,36 @@ namespace SpeedListener.Tests;
 
 public sealed class SpeedListenerBackgroundServiceTests
 {
+    [Theory]
+    [InlineData(0)]
+    [InlineData(3)]
+    [InlineData(10)]
+    public async Task RejectedPacketFlood_LogsOnlyConfiguredSamplesButCountsEveryRejection(int sampleLimit)
+    {
+        var receiver = new ControlledReceiver
+        {
+            Payload = System.Text.Encoding.ASCII.GetBytes(string.Concat(Enumerable.Repeat("XS~\r\r", 1000)))
+        };
+        var metrics = new SpeedListenerMetrics(TimeProvider.System);
+        var logger = new RecordingLogger();
+        var service = CreateService(receiver, new StubMappingProvider(), new RecordingPublisher(),
+            new SpeedPacketParser(), metrics, logger, sampleLimit);
+        await service.StartAsync(CancellationToken.None);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await receiver.DatagramDelivered.Task.WaitAsync(timeout.Token);
+        await service.StopAsync(timeout.Token);
+        Assert.Equal(1000, metrics.Rejected);
+        Assert.Equal(sampleLimit, logger.Events.Count(id => id == 3002));
+        Assert.DoesNotContain(3020, logger.Events);
+        Assert.All(logger.RejectedSamples, sample =>
+        {
+            Assert.Equal(5000, sample["datagramLength"]);
+            Assert.Equal(128, ((string)sample["payloadHex"]!).Length);
+            Assert.Equal(true, sample["truncated"]);
+            Assert.Contains("Expected at least", (string)sample["reason"]!);
+        });
+    }
+
     [Fact]
     public async Task StopAsync_MultipleMessagesInDatagram_ArchivesEachAndCountsRejection()
     {
@@ -80,7 +111,9 @@ public sealed class SpeedListenerBackgroundServiceTests
         StubMappingProvider mappings,
         RecordingPublisher publisher,
         ISpeedPacketParser? parser = null,
-        SpeedListenerMetrics? metrics = null)
+        SpeedListenerMetrics? metrics = null,
+        ILogger<SpeedListenerBackgroundService>? logger = null,
+        int sampleLimit = 10)
     {
         var options = Options.Create(new SpeedListenerConfiguration
         {
@@ -90,7 +123,8 @@ public sealed class SpeedListenerBackgroundServiceTests
             ShutdownFlushTimeout = TimeSpan.FromSeconds(2),
             ShutdownMaxWriteAttempts = 1,
             ArchiveParallelism = 1,
-            SummaryInterval = TimeSpan.FromHours(1)
+            SummaryInterval = TimeSpan.FromHours(1),
+            RejectedPacketSamplesPerInterval = sampleLimit
         });
         metrics ??= new SpeedListenerMetrics(TimeProvider.System);
         var processor = new SpeedEventBatchProcessor(
@@ -108,7 +142,22 @@ public sealed class SpeedListenerBackgroundServiceTests
             processor,
             options,
             metrics,
-            NullLogger<SpeedListenerBackgroundService>.Instance);
+            logger ?? NullLogger<SpeedListenerBackgroundService>.Instance);
+    }
+
+    private sealed class RecordingLogger : ILogger<SpeedListenerBackgroundService>
+    {
+        public System.Collections.Concurrent.ConcurrentQueue<int> Events { get; } = new();
+        public System.Collections.Concurrent.ConcurrentQueue<Dictionary<string, object?>> RejectedSamples { get; } = new();
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            Events.Enqueue(eventId.Id);
+            if (eventId.Id == 3002 && state is IEnumerable<KeyValuePair<string, object?>> properties)
+                RejectedSamples.Enqueue(properties.ToDictionary(pair => pair.Key, pair => pair.Value));
+        }
     }
 
     private sealed class ControlledReceiver : IUdpDatagramReceiver

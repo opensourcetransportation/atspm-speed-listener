@@ -39,7 +39,8 @@ public sealed class HostBootstrapperTests
             ("database writer parallelism", value => value.DatabaseWriteParallelism = 0),
             ("write timeout", value => value.WriteTimeout = TimeSpan.Zero),
             ("poison threshold", value => value.PoisonDeviceFailureThreshold = 0),
-            ("summary interval", value => value.SummaryInterval = TimeSpan.Zero)
+            ("summary interval", value => value.SummaryInterval = TimeSpan.Zero),
+            ("rejected packet sample limit", value => value.RejectedPacketSamplesPerInterval = -1)
         };
 
         foreach (var testCase in cases)

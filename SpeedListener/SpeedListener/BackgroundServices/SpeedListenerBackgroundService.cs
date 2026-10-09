@@ -22,6 +22,7 @@ public sealed class SpeedListenerBackgroundService(
     ILogger<SpeedListenerBackgroundService> logger) : BackgroundService
 {
     private readonly SpeedListenerLogMessages _log = new(logger);
+    private long _rejectedPacketSamples;
 
     /// <inheritdoc/>
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -44,13 +45,13 @@ public sealed class SpeedListenerBackgroundService(
                 if (!result.IsSuccess)
                 {
                     metrics.RecordRejected();
-                    if (logger.IsEnabled(LogLevel.Debug))
+                    if (logger.IsEnabled(LogLevel.Debug) &&
+                        Interlocked.Increment(ref _rejectedPacketSamples) <= options.Value.RejectedPacketSamplesPerInterval)
                     {
                         var previewLength = Math.Min(datagram.Buffer.Length, 64);
                         var payloadHex = Convert.ToHexString(datagram.Buffer.AsSpan(0, previewLength));
                         _log.PacketRejected(datagram.RemoteEndPoint,
-                            $"{result.Error} DatagramLength={datagram.Buffer.Length}; PayloadHex={payloadHex}" +
-                            (previewLength < datagram.Buffer.Length ? " (first 64 bytes)" : string.Empty));
+                            result.Error, datagram.Buffer.Length, payloadHex, previewLength < datagram.Buffer.Length);
                     }
                 }
                 else if (!channel.Writer.TryWrite(result.Event!))
@@ -135,6 +136,7 @@ public sealed class SpeedListenerBackgroundService(
         long previousRejected = 0, previousUnknown = 0, previousDropped = 0;
         while (await timer.WaitForNextTickAsync(cancellationToken))
         {
+            Interlocked.Exchange(ref _rejectedPacketSamples, 0);
             var rejected = metrics.Rejected;
             var unknown = metrics.Unknown;
             var dropped = metrics.Dropped;

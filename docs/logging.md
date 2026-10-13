@@ -51,7 +51,18 @@ At Debug, each flushed batch logs one record per detector ID: event 3031
 3032 (`SpeedListenerMappedDetector`) with the selected device ID. Both include
 the first-four-digit location identifier and event count. Mapped records describe
 routing, not a successful database commit; confirm archive logs separately.
-These diagnostics do not add records at Information, Warning or Error.
+These per-batch diagnostics do not add records at Information, Warning or Error.
+Unknown detectors also produce Warning event 3033 (`SpeedListenerUnknownDetectorWarning`):
+the first batch for each detector warns immediately, then repeated warnings are
+limited to once per `DeviceMappingRefreshInterval` (normally five minutes).
+`EventCount` includes events skipped since the preceding warning, including
+suppressed batches. Each detector has an independent window. Pending counts are
+reported on the next nonempty batch at or after the window expires, even if
+that batch contains only mapped traffic; with no further traffic they remain
+unreported, but the aggregate `Unknown` counter still includes every skipped event.
+The window starts at the warning time and is independent of actual database
+refresh success. Idle entries expire; a service restart resets the warning windows.
+Mapped detectors still have no per-detector warnings.
 
 For example, search startup capture for `SpeedListenerUnknownDetector` and
 `SpeedListenerMappedDetector`, then filter `LocationIdentifier=5026` or `5271`.

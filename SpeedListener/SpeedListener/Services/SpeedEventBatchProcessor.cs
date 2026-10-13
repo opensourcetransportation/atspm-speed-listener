@@ -17,6 +17,16 @@ public sealed class SpeedEventBatchProcessor(
     SpeedListenerMetrics metrics,
     ILogger<SpeedEventBatchProcessor> logger) : ISpeedEventBatchProcessor
 {
+    // Accessed only by the single batch consumer. Expire idle detector entries so
+    // obsolete configuration does not leave a permanent warning cache.
+    private readonly Dictionary<string, UnknownDetectorWarning> _unknownWarnings = new(StringComparer.Ordinal);
+    private sealed class UnknownDetectorWarning(string locationIdentifier, DateTimeOffset nextWarningAt)
+    {
+        public string LocationIdentifier { get; } = locationIdentifier;
+        public DateTimeOffset NextWarningAt { get; set; } = nextWarningAt;
+        public long PendingCount { get; set; }
+    }
+
     private int _inFlightEventCount;
     private readonly SpeedListenerLogMessages _log = new(logger);
 
@@ -87,6 +97,10 @@ public sealed class SpeedEventBatchProcessor(
         try
         {
             var mappings = await mappingProvider.GetMappingsAsync(cancellationToken);
+            var now = timeProvider.GetUtcNow();
+            foreach (var id in _unknownWarnings.Where(pair => pair.Value.PendingCount == 0 && pair.Value.NextWarningAt <= now)
+                         .Select(pair => pair.Key).ToArray())
+                _unknownWarnings.Remove(id);
             var envelopes = new List<EventBatchEnvelope>();
             foreach (var group in batch.GroupBy(speedEvent =>
                      {
@@ -97,9 +111,20 @@ public sealed class SpeedEventBatchProcessor(
                 if (!mappings.TryGetValue(group.Key, out var mapping))
                 {
                     metrics.RecordUnknown(group.LongCount());
-                    if (logger.IsEnabled(LogLevel.Debug))
+                    if (logger.IsEnabled(LogLevel.Debug) || logger.IsEnabled(LogLevel.Warning))
                         foreach (var detector in group.GroupBy(item => item.DetectorId))
-                            _log.UnknownDetector(detector.Key, group.Key, detector.LongCount());
+                        {
+                            var count = detector.LongCount();
+                            if (logger.IsEnabled(LogLevel.Debug))
+                                _log.UnknownDetector(detector.Key, group.Key, count);
+                            if (logger.IsEnabled(LogLevel.Warning))
+                            {
+                                var id = detector.Key ?? string.Empty;
+                                if (!_unknownWarnings.TryGetValue(id, out var warning))
+                                    _unknownWarnings.Add(id, warning = new UnknownDetectorWarning(group.Key, now));
+                                warning.PendingCount += count;
+                            }
+                        }
                     continue;
                 }
 
@@ -116,6 +141,14 @@ public sealed class SpeedEventBatchProcessor(
                     DeviceId = mapping.DeviceId,
                     Items = events
                 });
+            }
+
+            foreach (var (detectorId, warning) in _unknownWarnings)
+            {
+                if (warning.PendingCount == 0 || warning.NextWarningAt > now) continue;
+                _log.UnknownDetectorWarning(detectorId, warning.LocationIdentifier, warning.PendingCount);
+                warning.PendingCount = 0;
+                warning.NextWarningAt = now + options.Value.DeviceMappingRefreshInterval;
             }
 
             if (envelopes.Count > 0)

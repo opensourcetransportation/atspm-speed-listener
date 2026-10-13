@@ -97,9 +97,15 @@ public sealed class SpeedEventBatchProcessor(
                 if (!mappings.TryGetValue(group.Key, out var mapping))
                 {
                     metrics.RecordUnknown(group.LongCount());
+                    if (logger.IsEnabled(LogLevel.Debug))
+                        foreach (var detector in group.GroupBy(item => item.DetectorId))
+                            _log.UnknownDetector(detector.Key, group.Key, detector.LongCount());
                     continue;
                 }
 
+                if (logger.IsEnabled(LogLevel.Debug))
+                    foreach (var detector in group.GroupBy(item => item.DetectorId))
+                        _log.MappedDetector(detector.Key, group.Key, mapping.DeviceId, detector.LongCount());
                 var events = group.ToList();
                 envelopes.Add(new EventBatchEnvelope
                 {

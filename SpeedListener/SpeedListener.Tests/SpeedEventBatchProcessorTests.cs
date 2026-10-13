@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using SpeedListener.Configuration;
 using SpeedListener.Publishing;
@@ -159,11 +160,53 @@ public sealed class SpeedEventBatchProcessorTests
         Assert.Equal(1, processor.InFlightEventCount);
     }
 
+    [Theory]
+    [InlineData(LogLevel.Debug, 4)]
+    [InlineData(LogLevel.Information, 0)]
+    [InlineData(LogLevel.Warning, 0)]
+    public async Task DetectorDiagnostics_DistinguishUnknownFromScottSites_OnlyAtDebug(LogLevel level, int expectedRecords)
+    {
+        var logger = new DiagnosticLogger(level);
+        var metrics = new SpeedListenerMetrics(TimeProvider.System);
+        var publisher = new RecordingPublisher();
+        var processor = CreateProcessor(publisher, metrics: metrics, logger: logger);
+        var channel = Channel.CreateUnbounded<SpeedEvent>();
+        foreach (var id in new[] { "999920", "999920", "999922", "502620", "527148" })
+            channel.Writer.TryWrite(Event(id, DateTime.UtcNow, 30));
+        channel.Writer.Complete();
+        await processor.ProcessAsync(channel.Reader, CancellationToken.None);
+        Assert.Equal(3, metrics.Unknown);
+        Assert.Equal(2, Assert.Single(publisher.Batches).Count);
+        Assert.Equal(expectedRecords, logger.Records.Count);
+        if (level == LogLevel.Debug)
+        {
+            var unknown = logger.Records.Where(record => record.Id == 3031).ToArray();
+            Assert.Equal(new[] { "999920", "999922" }, unknown.Select(record => record.Data["detectorId"]));
+            Assert.Equal(new long[] { 2, 1 }, unknown.Select(record => (long)record.Data["eventCount"]!));
+            Assert.All(unknown, record => Assert.Equal("9999", record.Data["locationIdentifier"]));
+            Assert.Equal(new[] { "502620", "527148" }, logger.Records.Where(record => record.Id == 3032)
+                .Select(record => record.Data["detectorId"]));
+        }
+    }
+
+    private sealed class DiagnosticLogger(LogLevel minimum) : ILogger<SpeedEventBatchProcessor>
+    {
+        public List<(int Id, Dictionary<string, object?> Data)> Records { get; } = [];
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel level) => level >= minimum;
+        public void Log<TState>(LogLevel level, EventId id, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            if (id.Id is 3031 or 3032 && state is IEnumerable<KeyValuePair<string, object?>> pairs)
+                Records.Add((id.Id, pairs.ToDictionary(pair => pair.Key, pair => pair.Value)));
+        }
+    }
+
     private static SpeedEventBatchProcessor CreateProcessor(
         RecordingPublisher publisher,
         int batchSize = 10,
         TimeSpan? flushInterval = null,
-        SpeedListenerMetrics? metrics = null)
+        SpeedListenerMetrics? metrics = null,
+        ILogger<SpeedEventBatchProcessor>? logger = null)
     {
         var configuration = Options.Create(new SpeedListenerConfiguration
         {
@@ -174,7 +217,7 @@ public sealed class SpeedEventBatchProcessorTests
         return new SpeedEventBatchProcessor(
             new StubMappingProvider(), publisher, configuration, TimeProvider.System,
             metrics ?? new SpeedListenerMetrics(TimeProvider.System),
-            NullLogger<SpeedEventBatchProcessor>.Instance);
+            logger ?? NullLogger<SpeedEventBatchProcessor>.Instance);
     }
 
     private static SpeedEvent Event(string detectorId, DateTime timestamp, int mph) => new()

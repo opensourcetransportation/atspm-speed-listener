@@ -44,6 +44,21 @@ speed messages produce one aggregate mapping warning per summary interval (3009)
 so valid speed data lacking a configured detector identity remains visible. Debug volume can be much
 larger than the healthy estimate; that is intentional to retain diagnostic records.
 
+## Identify detector routing
+
+At Debug, each flushed batch logs one record per detector ID: event 3031
+(`SpeedListenerUnknownDetector`) for a missing current speed-device mapping, or
+3032 (`SpeedListenerMappedDetector`) with the selected device ID. Both include
+the first-four-digit location identifier and event count. Mapped records describe
+routing, not a successful database commit; confirm archive logs separately.
+These diagnostics do not add records at Information, Warning or Error.
+
+For example, search startup capture for `SpeedListenerUnknownDetector` and
+`SpeedListenerMappedDetector`, then filter `LocationIdentifier=5026` or `5271`.
+No records for those locations means none were processed during that capture;
+it does not prove the configuration is missing. Packet source addresses are not
+retained in the batch and are not included in routing records.
+
 ## Retention is per sink
 
 - Optional `ATSPM_STARTUP_LOG` capture supports `ATSPM_STARTUP_LOG_MAX_BYTES`.

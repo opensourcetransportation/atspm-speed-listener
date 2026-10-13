@@ -125,6 +125,32 @@ public sealed class HostBootstrapperTests
         Assert.True(AppContext.TryGetSwitch("Npgsql.EnableLegacyTimestampBehavior", out var enabled) && enabled);
     }
 
+    [Fact]
+    public void GeneratorBuildValidatesOptionsEvenWhenHostIsNeverStarted()
+    {
+        Assert.Throws<Microsoft.Extensions.Options.OptionsValidationException>(() =>
+            HostBootstrapper.BuildGeneratorHost(config => config.EventTimeZoneId = "invalid-zone"));
+    }
+
+    [Theory]
+    [InlineData("127.1", false)]
+    [InlineData("2130706433", false)]
+    [InlineData("0x7f000001", false)]
+    [InlineData("010.0.0.1", false)]
+    [InlineData("192.168.001.1", false)]
+    [InlineData("::ffff:192.0.2.010", false)]
+    [InlineData("127.0.0.1.", false)]
+    [InlineData("127.0.0.1", true)]
+    [InlineData("192.0.2.10", true)]
+    [InlineData("2001:db8::1", true)]
+    [InlineData("::ffff:192.0.2.10", true)]
+    public void SourceAddressesRequireCanonicalDottedQuadOrIpv6(string address, bool valid)
+    {
+        var config = ValidConfiguration();
+        config.UntaggedSpeedDetectorMappings.Add(new() { SourceAddress = address, SourcePort = 2103, DetectorId = "527148" });
+        Assert.Equal(valid, HostBootstrapper.IsValidListenerConfiguration(config));
+    }
+
     private static SpeedListenerConfiguration ValidConfiguration() => new()
     {
         UdpPort = 10088,

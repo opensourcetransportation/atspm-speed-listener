@@ -29,10 +29,10 @@ public partial class SpeedListenerLogMessages(ILogger logger)
     public partial void ListenerStopped(long received, long rejected, long dropped, long parsed, long actuation, long unmappedSpeed);
 
     [LoggerMessage(EventId = 3006, EventName = "Listener Summary", Level = LogLevel.Information,
-        Message = "SpeedListenerSummary Received={received} Parsed={parsed} Rejected={rejected} Unknown={unknown} ChannelDepth={channelDepth} Dropped={dropped} BatchesPublished={batchesPublished} EnvelopesPublished={envelopesPublished} PublishLatencyMs={publishLatencyMs} Retries={retries} PublishFailures={publishFailures} PoisonBatches={poisonBatches} MappingAgeSeconds={mappingAgeSeconds} MappingRefreshFailures={mappingRefreshFailures} Actuation={actuation} UnmappedSpeed={unmappedSpeed}")]
-    public partial void Summary(long received, long parsed, long rejected, long unknown, int channelDepth,
+        Message = "SpeedListenerSummary Received={received} Parsed={parsed} Rejected={rejected} UnknownSinceLast={unknownSinceLast} ChannelDepth={channelDepth} Dropped={dropped} BatchesPublished={batchesPublished} EnvelopesPublished={envelopesPublished} PublishLatencyMs={publishLatencyMs} Retries={retries} PublishFailures={publishFailures} PoisonBatches={poisonBatches} MappingAgeSeconds={mappingAgeSeconds} MappingRefreshFailures={mappingRefreshFailures} Actuation={actuation} UnmappedSpeed={unmappedSpeed} WriteConflicts={writeConflicts} ConflictEvents={conflictEvents}")]
+    public partial void Summary(long received, long parsed, long rejected, long unknownSinceLast, int channelDepth,
         long dropped, long batchesPublished, long envelopesPublished, double publishLatencyMs, long retries,
-        long publishFailures, long poisonBatches, double mappingAgeSeconds, long mappingRefreshFailures, long actuation, long unmappedSpeed);
+        long publishFailures, long poisonBatches, double mappingAgeSeconds, long mappingRefreshFailures, long actuation, long unmappedSpeed, long writeConflicts, long conflictEvents);
 
     [LoggerMessage(EventId = 3007, EventName = "Listener Loss Summary", Level = LogLevel.Warning,
         Message = "SpeedListenerLossSummary RejectedSinceLast={rejectedSinceLast} UnknownSinceLast={unknownSinceLast} DroppedSinceLast={droppedSinceLast}")]
@@ -99,5 +99,8 @@ public partial class SpeedListenerLogMessages(ILogger logger)
         Message = "Dropped poison speed-event envelope for device {deviceId}, location {locationIdentifier}; consecutive drops {consecutiveDrops}")]
     public partial void PoisonEnvelopeDropped(int deviceId, string locationIdentifier, int consecutiveDrops,
         Exception exception);
+    [LoggerMessage(EventId = 3045, EventName = "Device Hour Write Conflict", Level = LogLevel.Error,
+        Message = "SpeedListenerWriteConflict DeviceId={deviceId} Hour={hour} EventCount={eventCount}; skipped this uncertain device-hour, other rows continue; these events may already be committed")]
+    public partial void EventLogWriteConflict(int deviceId, DateTime hour, long eventCount, Exception exception);
 }
 #pragma warning restore CS1591

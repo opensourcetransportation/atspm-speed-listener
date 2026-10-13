@@ -220,6 +220,38 @@ public sealed class DatabaseEventPublisherTests
         repository.Verify(instance => instance.UpdateAsync(It.IsAny<CompressedEventLogBase>()), Times.Exactly(2));
     }
 
+    [Fact]
+    public async Task PublishAsync_UncertainDeviceHourDoesNotStopOtherHoursOrDevices()
+    {
+        var writer = new Mock<IEventLogWriter>();
+        var saved = new System.Collections.Concurrent.ConcurrentBag<(int Device, int Hour)>();
+        writer.Setup(value => value.UpsertAsync(It.IsAny<CompressedEventLogBase>(), It.IsAny<CancellationToken>()))
+            .Returns((CompressedEventLogBase row, CancellationToken _) =>
+            {
+                if (row.DeviceId == 1 && row.Start.Hour == 18)
+                    return Task.FromException(new EventLogWriteConflictException("uncertain concurrent change"));
+                saved.Add((row.DeviceId, row.Start.Hour));
+                return Task.CompletedTask;
+            });
+        await using var services = new ServiceCollection().AddScoped(_ => writer.Object).BuildServiceProvider();
+        var metrics = new SpeedListenerMetrics(TimeProvider.System);
+        var publisher = new DatabaseEventPublisher(services.GetRequiredService<IServiceScopeFactory>(),
+            Options.Create(new SpeedListenerConfiguration { PoisonDeviceFailureThreshold = 1 }), metrics,
+            NullLogger<DatabaseEventPublisher>.Instance);
+        var first = CreateEnvelope();
+        var original = first.Items.Single();
+        first.Items = first.Items.Concat(new[] { new SpeedEvent { DetectorId = original.DetectorId,
+            Timestamp = original.Timestamp.AddHours(1), Mph = 30, Kph = 48 } }).ToList();
+        await publisher.PublishAsync([first, CreateEnvelope(2, "L2", "D2")], parallelism: 2);
+        Assert.Contains((1, 19), saved);
+        Assert.Contains((2, 18), saved);
+        Assert.Equal(1, metrics.WriteConflicts);
+        Assert.Equal(1, metrics.ConflictEvents);
+        Assert.Equal(1, metrics.EnvelopesPublished); // Only the fully archived device 2 envelope.
+        Assert.Equal(0, metrics.PoisonBatches);
+        Assert.Equal(0, metrics.PublishFailures);
+    }
+
     private static DatabaseEventPublisher CreatePublisher(Mock<IEventLogRepository> repository,
         int maxAttempts = 1, int poisonThreshold = 3)
     {

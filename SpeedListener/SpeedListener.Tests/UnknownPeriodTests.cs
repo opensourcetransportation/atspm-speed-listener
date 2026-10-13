@@ -17,7 +17,7 @@ public sealed class UnknownPeriodTests
         Assert.Equal(5, first.Details[0].EventCount);
         Assert.Equal(2003, first.Details.Sum(detail => detail.EventCount) + first.AdditionalEventCount);
         Assert.Equal(0, metrics.TakeUnknownPeriod().Count);
-        Assert.Equal(0, metrics.Unknown);
+        Assert.Equal(0, metrics.UnknownSinceLast);
         metrics.RecordUnknown(7, "527132", "5271");
         var second = metrics.TakeUnknownPeriod();
         Assert.Equal(7, second.Count);

@@ -31,12 +31,19 @@ public sealed class SpeedListenerMetrics(TimeProvider timeProvider)
     private long _received, _parsed, _rejected, _dropped;
     private long _batchesPublished, _envelopesPublished, _publishLatencyTicks;
     private long _retries, _publishFailures, _poisonBatches, _mappingRefreshFailures;
-    private long _mappingRefreshedAtTicks;
+    private long _mappingRefreshedAtTicks, _writeConflicts, _conflictEvents;
+    public long WriteConflicts => Interlocked.Read(ref _writeConflicts);
+    public long ConflictEvents => Interlocked.Read(ref _conflictEvents);
+    public void RecordWriteConflict(long eventCount)
+    {
+        Interlocked.Increment(ref _writeConflicts);
+        Interlocked.Add(ref _conflictEvents, eventCount);
+    }
 
     public long Received => Interlocked.Read(ref _received);
     public long Parsed => Interlocked.Read(ref _parsed);
     public long Rejected => Interlocked.Read(ref _rejected);
-    public long Unknown { get { lock (_unknownPeriodLock) return _unknownPeriod; } }
+    public long UnknownSinceLast { get { lock (_unknownPeriodLock) return _unknownPeriod; } }
     public long Dropped => Interlocked.Read(ref _dropped);
     public long BatchesPublished => Interlocked.Read(ref _batchesPublished);
     public long EnvelopesPublished => Interlocked.Read(ref _envelopesPublished);

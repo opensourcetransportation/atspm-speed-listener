@@ -42,7 +42,7 @@ public sealed class SpeedEventBatchProcessorTests
         channel.Writer.Complete();
         await processor.ProcessAsync(channel.Reader, CancellationToken.None);
         Assert.Empty(publisher.Batches);
-        Assert.Equal(1, metrics.Unknown);
+        Assert.Equal(1, metrics.UnknownSinceLast);
     }
 
     [Fact]
@@ -122,7 +122,7 @@ public sealed class SpeedEventBatchProcessorTests
         await processor.ProcessAsync(channel.Reader, CancellationToken.None);
 
         Assert.Empty(publisher.Batches);
-        Assert.Equal(1, metrics.Unknown);
+        Assert.Equal(1, metrics.UnknownSinceLast);
         Assert.Equal(0, processor.InFlightEventCount);
     }
 
@@ -176,7 +176,7 @@ public sealed class SpeedEventBatchProcessorTests
             channel.Writer.TryWrite(Event(id, DateTime.UtcNow, 30));
         channel.Writer.Complete();
         await processor.ProcessAsync(channel.Reader, CancellationToken.None);
-        Assert.Equal(3, metrics.Unknown);
+        Assert.Equal(3, metrics.UnknownSinceLast);
         Assert.Equal(2, Assert.Single(publisher.Batches).Count);
         Assert.Equal(expectedRecords, logger.Records.Count);
         var period = metrics.TakeUnknownPeriod();

@@ -58,3 +58,27 @@ switchover and 6 installer/capture scenarios passed under PowerShell 7 and Windo
 tests mock service/firewall operations. No GCP configuration or event-log data
 was changed for this review work. These changes do not add database tables or
 provide durable cross-process replay; use one writer per stream/database.
+
+## Second October 13 follow-up
+
+| Finding | Resolution |
+| --- | --- |
+| Replay equality includes ignored event metadata | Compare fingerprints of persisted timestamp, detector and speed fields; exclude LocationIdentifier. Regression tests perform the real compression/decompression snapshot before retrying lost insert and update acknowledgements. |
+| Outside change stops service | Recognize a committed prefix followed by later appends. Unresolvable changes raise a scoped conflict handled by the workflow: log Error 3045, count WriteConflicts/ConflictEvents and skip that device-hour. Other hours/devices continue; conflicted envelopes are not reported as fully archived. |
+| Merge plan retains full hourly copies | Retain counts and two SHA-256 fingerprints instead of before/after event lists. The actual merged payload still needs materialization for the packaged compressed collection format. |
+| Fall-back local timestamps rejected | Select the repeated-time occurrence closest to packet receipt and retain its local wall-clock value. Nonexistent spring-forward times still require an offset. |
+| Generator validation never runs | Eagerly resolve validated options before returning the built discovery host; CLI reports validation failures without querying devices. |
+| IP parser accepts typo addresses | Require canonical dotted-quad IPv4, including mapped IPv6 tails; also accept proper IPv6 literals. Reject short, numeric, hex and leading-zero IPv4 forms. |
+| Unknown has different counter semantics | Keep the requested per-period behavior and rename the logged field UnknownSinceLast. Per-detector warning counts reset each summary; other summary counters remain cumulative. |
+
+Lost-ack evidence now includes actual compressed payload round trips, including
+omitted LocationIdentifier metadata, rather than relying only on live lists.
+The row key supplies location identity. Retry state remains scoped to one
+in-process publish and deployments still require one writer per stream/database.
+
+Second follow-up validation: 167 Release C# tests passed, including lost insert
+and update acknowledgements using a real temporary SQLite relational database
+with the unmodified packaged EventLogContext, plus compressed in-memory
+snapshots. The self-contained Windows generator rejects invalid configuration
+before database discovery; offline target preview sends no packets. Deployment
+scripts are unchanged from the previously verified 27 scenarios.

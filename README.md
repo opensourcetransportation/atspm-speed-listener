@@ -119,7 +119,7 @@ the incomplete tail. Fragments are not reassembled across separate datagrams.
 Unexpected trailing data that is neither a terminator nor a valid timestamp is rejected.
 `Received` counts datagrams; `Parsed` counts queued events and `Rejected` counts
 invalid messages, so one datagram can produce multiple parsed or rejected records.
-The summary's `Unknown` and each unknown-detector warning count only the last
+The summary's `UnknownSinceLast` and each unknown-detector warning count only the last
 summary period, resetting on each summary. Detector detail aggregation is capped
 at 256 IDs per period, with all additional skipped events counted in an overflow
 warning. Debug retains all per-batch detector details.
@@ -129,17 +129,22 @@ logs, and upserted through cancellable EF operations using the packaged ATSPM
 context, models, primary keys and compression. The local writer preserves every received event because the packaged generic Data accessors and
 repository Union would otherwise remove equal events. The writer uses the base
 payload accessor and cancellable EF operations. Successfully acknowledged hourly rows are skipped on retry;
-uncertain in-process commits are checked against the retained before/after row
-contents. Distinct events with identical values are preserved, including within
+uncertain in-process commits are checked against fixed-size fingerprints of the
+persisted event fields. LocationIdentifier is row metadata, not part of an event
+fingerprint. No full hourly payload copies are retained in the retry plan. Distinct events with identical values are preserved, including within
 one batch and across separate batches. A retry reuses the same logical row and
-skips it only when its exact intended contents are already stored. Unexpected
-outside changes fail rather than overwrite data. No database schema change is
+recognizes its intended prefix after a commit, including subsequent appends by
+another writer. An unresolvable outside change logs a device-hour conflict and
+skips only that uncertain contribution; other hours and devices continue.
+WriteConflicts and ConflictEvents expose those cases, which may already be
+committed. Partially conflicted envelopes are excluded from EnvelopesPublished. No database schema change is
 required; retry state lasts only for the current publish operation.
 
 Receipt times and explicitly offset sensor timestamps are instants converted
 to `EventTimeZoneId` for storage. Offset-less sensor timestamps are interpreted
-as wall-clock time in that zone; DST gaps and ambiguous repeated times require
-an explicit offset and are rejected otherwise. UTC remains the default. For an agency database
+as wall-clock time in that zone. Repeated fall-back times use the occurrence
+closest to packet receipt; the wall-clock timestamp and all events are retained.
+Nonexistent spring-forward times still require an explicit offset. UTC remains the default. For an agency database
 that stores local wall-clock times, configure its zone before ingesting data;
 non-UTC storage uses `DateTimeKind.Unspecified`. Match the existing database's
 convention, including its treatment of repeated hours when daylight saving ends.

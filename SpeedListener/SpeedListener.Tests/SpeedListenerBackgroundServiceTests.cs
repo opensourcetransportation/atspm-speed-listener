@@ -207,7 +207,7 @@ public sealed class SpeedListenerBackgroundServiceTests
             Events.Enqueue(eventId.Id);
             if (eventId.Id == 3006 && state is IEnumerable<KeyValuePair<string, object?>> summaryProperties)
             {
-                var count = (long)summaryProperties.Single(pair => pair.Key == "unknown").Value!;
+                var count = (long)summaryProperties.Single(pair => pair.Key == "unknownSinceLast").Value!;
                 var hadUnknown = UnknownSummaryCounts.Any(value => value > 0);
                 UnknownSummaryCounts.Enqueue(count);
                 if (hadUnknown && count == 0) UnknownReset.TrySetResult();

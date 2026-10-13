@@ -131,9 +131,10 @@ Two properties of the storage path are documented here so they are understood ra
 The listener's local writer deliberately bypasses both: it uses the base payload
 collection and appends every event, preserving identical detections within and
 across batches. In-process retries retain the logical compressed row and its
-before/after payloads, then recognize an already committed intended result.
-Unexpected outside changes stop the write instead of overwriting or appending
-again. This does not provide durable replay after process loss, and deployments
+fixed-size fingerprints of persisted before/after event fields, then recognize
+an already committed intended prefix. LocationIdentifier is excluded because it
+is row metadata and is not serialized on an event. Unresolvable outside changes
+are logged and skipped for that device-hour while other writes continue. This does not provide durable replay after process loss, and deployments
 must still use only one writer per stream and database.
 
 A third property constrains deployment rather than design: because `Upsert` is a read-modify-write against a shared row, two listeners writing the same device-hour concurrently lose events to last-write-wins. This makes single-writer cutover a correctness requirement, not just a duplicate-avoidance preference. See section 12.

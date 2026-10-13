@@ -32,7 +32,9 @@ six-digit ATSPM detector ID in the existing `SpeedListenerConfiguration` section
 
 Addresses above are examples, not discovered sensor settings. Confirm the actual
 source endpoint and channel with the sensor administrator. Mapping uses the UDP
-source port, not the listener destination port. For IPv6 use `"SourceAddress": "2001:db8::1"` with a separate numeric
+source port, not the listener destination port. IPv4 must use four decimal octets
+without leading zeros; short, integer, octal and hexadecimal forms are rejected.
+IPv6 literals are also accepted. For IPv6 use `"SourceAddress": "2001:db8::1"` with a separate numeric
 `SourcePort`. The list avoids colon-containing configuration dictionary keys;
 .NET treats colons as configuration path separators. The old dictionary format
 is no longer valid and must be converted before upgrading if it was configured. There is no IP-only fallback. If multiple sensors

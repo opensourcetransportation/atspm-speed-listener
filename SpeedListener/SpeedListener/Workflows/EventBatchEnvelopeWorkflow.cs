@@ -20,7 +20,8 @@ public sealed class EventBatchEnvelopeWorkflow
         int databaseWriteParallelism = 8,
         Func<EventBatchEnvelope, CompressedEventLogBase, bool>? alreadySaved = null,
         Action<EventBatchEnvelope, CompressedEventLogBase>? onSaved = null,
-        Func<EventBatchEnvelope, CompressedEventLogBase, CompressedEventLogBase>? retainRow = null)
+        Func<EventBatchEnvelope, CompressedEventLogBase, CompressedEventLogBase>? retainRow = null,
+        Action<EventBatchEnvelope, CompressedEventLogBase, EventLogWriteConflictException>? onConflict = null)
     {
         if (databaseWriteParallelism <= 0)
             throw new ArgumentOutOfRangeException(nameof(databaseWriteParallelism));
@@ -46,7 +47,11 @@ public sealed class EventBatchEnvelopeWorkflow
             {
                 await using var scope = scopeFactory.CreateAsyncScope();
                 var writer = scope.ServiceProvider.GetRequiredService<IEventLogWriter>();
-                await writer.UpsertAsync(compressed, cancellationToken);
+                try { await writer.UpsertAsync(compressed, cancellationToken); }
+                catch (EventLogWriteConflictException conflict) when (onConflict is not null)
+                {
+                    onConflict(archived.Envelope, compressed, conflict);
+                }
                 onSaved?.Invoke(archived.Envelope, compressed);
             }
             finally

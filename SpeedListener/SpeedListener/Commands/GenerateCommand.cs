@@ -89,7 +89,7 @@ public sealed class GenerateCommand : Command
                 Report(result);
                 context.ExitCode = result.SendFailures > 0 ? 1 : result.StopReason == "cancelled" ? 130 : 0;
             }
-            catch (Exception exception) when (exception is ArgumentException or IOException or System.Net.Sockets.SocketException)
+            catch (Exception exception) when (exception is ArgumentException or IOException or System.Net.Sockets.SocketException or Microsoft.Extensions.Options.OptionsValidationException)
             {
                 Console.Error.WriteLine(exception.Message);
                 context.ExitCode = 1;

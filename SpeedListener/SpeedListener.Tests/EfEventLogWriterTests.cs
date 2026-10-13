@@ -116,7 +116,7 @@ public sealed class EfEventLogWriterTests
     }
 
     [Fact]
-    public async Task RetryingLogicalRowAfterOutsideChangeFailsInsteadOfOverwriting()
+    public async Task RetryingCommittedRowAfterOutsideAppendRecognizesItsPrefix()
     {
         var options = new DbContextOptionsBuilder<EventLogContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options;
         var row = Row("502620");
@@ -125,7 +125,7 @@ public sealed class EfEventLogWriterTests
         await using (var outside = new InMemoryEventLogContext(options))
             await new EfEventLogWriter(outside).UpsertAsync(Row("502618"), CancellationToken.None);
         await using var retry = new InMemoryEventLogContext(options);
-        await Assert.ThrowsAsync<DbUpdateConcurrencyException>(() => new EfEventLogWriter(retry).UpsertAsync(row, CancellationToken.None));
+        await new EfEventLogWriter(retry).UpsertAsync(row, CancellationToken.None);
         await using var verify = new InMemoryEventLogContext(options);
         Assert.Equal(2, (await verify.Set<CompressedEventLogBase>().SingleAsync()).Data.Count());
     }
@@ -148,6 +148,109 @@ public sealed class EfEventLogWriterTests
         var decoded = Assert.IsAssignableFrom<IEnumerable<EventLogModelBase>>(converter.ConvertFromProvider(encoded));
         Assert.Equal(3, decoded.Count());
         Assert.All(decoded, item => Assert.IsType<SpeedEvent>(item));
+        Assert.All(decoded, item => Assert.True(string.IsNullOrEmpty(item.LocationIdentifier)));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task LostAcknowledgementAcrossCompressedSnapshotsPreservesDuplicates(bool seedExistingRow)
+    {
+        var name = Guid.NewGuid().ToString();
+        var root = new Microsoft.EntityFrameworkCore.Storage.InMemoryDatabaseRoot();
+        var seedOptions = new DbContextOptionsBuilder<EventLogContext>().UseInMemoryDatabase(name, root).Options;
+        if (seedExistingRow)
+            await using (var seed = new SerializedEventLogContext(seedOptions))
+                await new EfEventLogWriter(seed).UpsertAsync(Row("502620"), CancellationToken.None);
+        var options = new DbContextOptionsBuilder<EventLogContext>().UseInMemoryDatabase(name, root)
+            .AddInterceptors(new LoseFirstAcknowledgement()).Options;
+        await using var services = new ServiceCollection().AddScoped<EventLogContext>(_ => new SerializedEventLogContext(options))
+            .AddScoped<IEventLogWriter, EfEventLogWriter>().BuildServiceProvider();
+        var metrics = new SpeedListenerMetrics(TimeProvider.System);
+        var publisher = new DatabaseEventPublisher(services.GetRequiredService<IServiceScopeFactory>(),
+            Options.Create(new SpeedListenerConfiguration { MaxWriteAttempts = 2 }), metrics, NullLogger<DatabaseEventPublisher>.Instance);
+        var row = Row("502620");
+        await publisher.PublishAsync(new EventBatchEnvelope
+        {
+            DeviceId = row.DeviceId, LocationIdentifier = row.LocationIdentifier, DataType = nameof(SpeedEvent),
+            Start = row.Start, End = row.End, Items = row.Data.Concat(row.Data).ToList()
+        });
+        await using var verify = new SerializedEventLogContext(seedOptions);
+        var stored = await verify.Set<CompressedEventLogBase>().SingleAsync();
+        Assert.Equal(seedExistingRow ? 3 : 2, stored.Data.Count());
+        Assert.Equal(1, metrics.Retries);
+        Assert.Equal(0, metrics.WriteConflicts);
+    }
+
+    [Fact]
+    public async Task NonAppendOutsideChangeProducesScopedConflictAndPreservesStoredData()
+    {
+        var options = new DbContextOptionsBuilder<EventLogContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options;
+        var row = Row("502620");
+        await using (var first = new InMemoryEventLogContext(options))
+            await new EfEventLogWriter(first).UpsertAsync(row, CancellationToken.None);
+        await using (var outside = new InMemoryEventLogContext(options))
+        {
+            var stored = await outside.Set<CompressedEventLogBase>().SingleAsync();
+            stored.Data = Row("502618").Data.ToList();
+            outside.Entry(stored).State = EntityState.Modified;
+            await outside.SaveChangesAsync();
+        }
+        await using var retry = new InMemoryEventLogContext(options);
+        await Assert.ThrowsAsync<EventLogWriteConflictException>(() => new EfEventLogWriter(retry).UpsertAsync(row, CancellationToken.None));
+        await using var verify = new InMemoryEventLogContext(options);
+        Assert.Equal("502618", ((SpeedEvent)(await verify.Set<CompressedEventLogBase>().SingleAsync()).Data.Single()).DetectorId);
+    }
+
+    private sealed class SerializedEventLogContext(DbContextOptions<EventLogContext> options) : EventLogContext(options)
+    {
+        protected override void OnModelCreating(ModelBuilder builder)
+        {
+            base.OnModelCreating(builder);
+            var property = builder.Entity<CompressedEventLogBase>().Property(row => row.Data);
+            var converter = property.Metadata.GetValueConverter()!;
+            property.Metadata.SetValueComparer(new ValueComparer<IEnumerable<EventLogModelBase>>(
+                (left, right) => left!.SequenceEqual(right!),
+                events => events.Aggregate(0, (hash, item) => HashCode.Combine(hash, item.GetHashCode())),
+                events => CompressedSnapshot(events, converter)));
+        }
+    }
+
+    private static IEnumerable<EventLogModelBase> CompressedSnapshot(IEnumerable<EventLogModelBase> events,
+        Microsoft.EntityFrameworkCore.Storage.ValueConversion.ValueConverter converter) =>
+        (IEnumerable<EventLogModelBase>)converter.ConvertFromProvider(converter.ConvertToProvider(events.Cast<SpeedEvent>().ToList()))!;
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SqliteRealCompressionAndLostAcknowledgementPreserveEveryEvent(bool seedExistingRow)
+    {
+        await using var connection = new Microsoft.Data.Sqlite.SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var seedOptions = new DbContextOptionsBuilder<EventLogContext>().UseSqlite(connection).Options;
+        await using (var seed = new EventLogContext(seedOptions))
+        {
+            await seed.Database.EnsureCreatedAsync();
+            if (seedExistingRow) await new EfEventLogWriter(seed).UpsertAsync(Row("502620"), CancellationToken.None);
+        }
+        var options = new DbContextOptionsBuilder<EventLogContext>().UseSqlite(connection)
+            .AddInterceptors(new LoseFirstAcknowledgement()).Options;
+        await using var services = new ServiceCollection().AddScoped(_ => new EventLogContext(options))
+            .AddScoped<IEventLogWriter, EfEventLogWriter>().BuildServiceProvider();
+        var metrics = new SpeedListenerMetrics(TimeProvider.System);
+        var publisher = new DatabaseEventPublisher(services.GetRequiredService<IServiceScopeFactory>(),
+            Options.Create(new SpeedListenerConfiguration { MaxWriteAttempts = 2 }), metrics, NullLogger<DatabaseEventPublisher>.Instance);
+        var row = Row("502620");
+        await publisher.PublishAsync(new EventBatchEnvelope
+        {
+            DeviceId = row.DeviceId, LocationIdentifier = row.LocationIdentifier, DataType = nameof(SpeedEvent),
+            Start = row.Start, End = row.End, Items = row.Data.Concat(row.Data).ToList()
+        });
+        await using var verify = new EventLogContext(seedOptions);
+        var stored = await verify.Set<CompressedEventLogBase>().SingleAsync();
+        Assert.Equal(seedExistingRow ? 3 : 2, stored.Data.Count());
+        Assert.Equal(1, metrics.Retries);
+        Assert.Equal(0, metrics.WriteConflicts);
     }
 
     private static CompressedEventLogs<SpeedEvent> Row(string detector) => new()

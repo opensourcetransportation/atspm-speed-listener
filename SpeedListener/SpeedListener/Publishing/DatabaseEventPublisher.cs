@@ -32,11 +32,12 @@ public sealed class DatabaseEventPublisher(
         if (batch.Count == 0) return;
         var attemptBudget = maxAttempts ?? options.Value.MaxWriteAttempts;
         var saved = new ConcurrentDictionary<(EventBatchEnvelope Envelope, DateTime Hour), byte>();
+        var conflicts = new ConcurrentDictionary<EventBatchEnvelope, byte>();
         var rows = new ConcurrentDictionary<(EventBatchEnvelope Envelope, DateTime Hour), CompressedEventLogBase>();
 
         try
         {
-            await PublishWithRetryAsync(batch, parallelism, attemptBudget, saved, rows, cancellationToken);
+            await PublishWithRetryAsync(batch, parallelism, attemptBudget, saved, rows, conflicts, cancellationToken);
             foreach (var envelope in batch) _consecutiveDeviceDrops.TryRemove(envelope.DeviceId, out _);
         }
         catch (Exception ex) when (DatabaseFailureClassifier.Classify(ex) == DatabaseFailureKind.BatchData)
@@ -53,7 +54,7 @@ public sealed class DatabaseEventPublisher(
             {
                 try
                 {
-                    await PublishWithRetryAsync([envelope], parallelism, attemptBudget, saved, rows, cancellationToken);
+                    await PublishWithRetryAsync([envelope], parallelism, attemptBudget, saved, rows, conflicts, cancellationToken);
                     _consecutiveDeviceDrops.TryRemove(envelope.DeviceId, out _);
                 }
                 catch (Exception isolated) when (DatabaseFailureClassifier.Classify(isolated) == DatabaseFailureKind.BatchData)
@@ -69,6 +70,7 @@ public sealed class DatabaseEventPublisher(
     private async Task PublishWithRetryAsync(IReadOnlyList<EventBatchEnvelope> batch, int parallelism,
         int maxAttempts, ConcurrentDictionary<(EventBatchEnvelope Envelope, DateTime Hour), byte> saved,
         ConcurrentDictionary<(EventBatchEnvelope Envelope, DateTime Hour), CompressedEventLogBase> rows,
+        ConcurrentDictionary<EventBatchEnvelope, byte> conflicts,
         CancellationToken cancellationToken)
     {
         for (var attempt = 1; attempt <= maxAttempts; attempt++)
@@ -78,10 +80,14 @@ public sealed class DatabaseEventPublisher(
             var started = Stopwatch.GetTimestamp();
             try
             {
-                await ExecuteWorkflowAsync(batch, parallelism, saved, rows, timeout.Token);
+                await ExecuteWorkflowAsync(batch, parallelism, saved, rows, conflicts, timeout.Token);
                 var latency = Stopwatch.GetElapsedTime(started);
-                metrics.RecordPublished(batch.Count, latency);
-                _log.EnvelopesArchived(batch.Count, latency.TotalMilliseconds);
+                var archivedCount = batch.Count(envelope => !conflicts.ContainsKey(envelope));
+                if (archivedCount > 0)
+                {
+                    metrics.RecordPublished(archivedCount, latency);
+                    _log.EnvelopesArchived(archivedCount, latency.TotalMilliseconds);
+                }
                 return;
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -107,13 +113,21 @@ public sealed class DatabaseEventPublisher(
     private async Task ExecuteWorkflowAsync(IReadOnlyList<EventBatchEnvelope> batch, int parallelism,
         ConcurrentDictionary<(EventBatchEnvelope Envelope, DateTime Hour), byte> saved,
         ConcurrentDictionary<(EventBatchEnvelope Envelope, DateTime Hour), CompressedEventLogBase> rows,
+        ConcurrentDictionary<EventBatchEnvelope, byte> conflicts,
         CancellationToken cancellationToken)
     {
         var workflow = new EventBatchEnvelopeWorkflow(scopeFactory, parallelism, cancellationToken,
             options.Value.DatabaseWriteParallelism,
             (envelope, row) => saved.ContainsKey((envelope, row.Start)),
             (envelope, row) => saved.TryAdd((envelope, row.Start), 0),
-            (envelope, row) => rows.GetOrAdd((envelope, row.Start), row));
+            (envelope, row) => rows.GetOrAdd((envelope, row.Start), row),
+            (envelope, row, conflict) =>
+            {
+                conflicts.TryAdd(envelope, 0);
+                var count = row.Data.LongCount();
+                metrics.RecordWriteConflict(count);
+                _log.EventLogWriteConflict(row.DeviceId, row.Start, count, conflict);
+            });
         try
         {
             foreach (var envelope in batch)

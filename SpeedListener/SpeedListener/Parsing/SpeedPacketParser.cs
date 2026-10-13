@@ -124,9 +124,14 @@ public sealed class SpeedPacketParser(IOptions<SpeedListenerConfiguration>? opti
                     if (!DateTime.TryParse(timestampText, CultureInfo.InvariantCulture, DateTimeStyles.None, out var localTime))
                         return SpeedPacketParseResult.Failure("Unexpected bytes after the detector identifier; expected a terminator or timestamp.");
                     localTime = DateTime.SpecifyKind(localTime, DateTimeKind.Unspecified);
-                    if (_eventTimeZone.IsInvalidTime(localTime) || _eventTimeZone.IsAmbiguousTime(localTime))
-                        return SpeedPacketParseResult.Failure("Sensor timestamp is invalid or ambiguous in EventTimeZoneId; supply an explicit UTC offset.");
-                    timestamp = TimeZoneInfo.ConvertTimeToUtc(localTime, _eventTimeZone);
+                    if (_eventTimeZone.IsInvalidTime(localTime))
+                        return SpeedPacketParseResult.Failure("Sensor timestamp is invalid in EventTimeZoneId; supply an explicit UTC offset.");
+                    timestamp = _eventTimeZone.IsAmbiguousTime(localTime)
+                        ? _eventTimeZone.GetAmbiguousTimeOffsets(localTime)
+                            .Select(offset => new DateTimeOffset(localTime, offset).UtcDateTime)
+                            .OrderBy(candidate => Math.Abs((candidate - datagram.ReceivedAt.UtcDateTime).Ticks))
+                            .ThenBy(candidate => candidate).First()
+                        : TimeZoneInfo.ConvertTimeToUtc(localTime, _eventTimeZone);
                 }
             }
         }

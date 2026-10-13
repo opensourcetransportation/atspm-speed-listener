@@ -54,7 +54,7 @@ routing, not a successful database commit; confirm archive logs separately.
 These per-batch diagnostics do not add records at Information, Warning or Error.
 Unknown detectors produce Warning event 3033 (`SpeedListenerUnknownDetectorWarning`)
 once per detector per summary period. `EventCount` counts only events skipped in
-that period; the summary's `Unknown` count also resets each period. The default
+that period; the summary's `UnknownSinceLast` count also resets each period. The default
 period is one minute (`SummaryInterval`). Graceful shutdown reports any remaining
 partial-period details. Mapped detectors still have no per-detector warnings.
 
@@ -137,3 +137,16 @@ deployment's `json-file` options `max-size=10m` and `max-file=3`.
 The live Docker rejection test also emitted all 1,000 Debug records. Published
 Windows checks confirmed that an unlimited capture and a 20 MiB cap both retained
 an existing 11 MiB capture. All six deployment option scenarios passed.
+
+## Scoped write conflicts
+
+`WriteConflicts` and `ConflictEvents` are lifetime counters. Error event 3045
+identifies an uncertain device-hour contribution after an outside row change.
+That contribution may already have committed; it is not appended a second time
+when its outcome cannot be established. Other hours and devices continue, and
+an envelope with any conflicted hour is excluded from `EnvelopesPublished`.
+
+The summary now names its interval counter `UnknownSinceLast`, replacing the
+previous mixed-semantics `Unknown` field. Other summary counters remain cumulative
+unless their names explicitly say otherwise. Per-detector warning EventCount is
+also per period; see the warning description above.

@@ -127,12 +127,12 @@ summary period, resetting on each summary. Detector detail aggregation is capped
 at 256 IDs per period, with all additional skipped events counted in an overflow
 warning. Debug retains all per-batch detector details.
 Archiving uses the local `ArchiveDataEventsWithoutDeduplication` workflow step,
-adapted from ATSPM's `ArchiveDataEvents`. It retains the same location/hour/device/
-event-type grouping, row types and timeline, assigning each concrete event list
-through the base payload accessor without the generic model's HashSet conversion.
-Its ATSPM-compatible device/event-array interface and the listener envelope
-adapter share the same implementation; the adapter avoids per-event tuple
-allocation. Every occurrence is preserved, including separate identical events
+adapted from ATSPM's `ArchiveDataEvents` with its upstream license header retained.
+The production envelope path groups speed events by calendar hour, using the
+envelope's location and device. It constructs `List<SpeedEvent>` and
+`CompressedEventLogs<SpeedEvent>` directly, without reflection or dynamic dispatch.
+Assigning through the base payload accessor bypasses the generic model's HashSet
+conversion. Every occurrence is preserved, including separate identical events
 and repeated references. Retry recognition remains a separate write operation.
 
 Parsed events are mapped to ATSPM

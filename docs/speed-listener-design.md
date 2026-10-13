@@ -449,19 +449,21 @@ Resolved by dropping the API path and no longer open: Data API authentication, i
 
 ## Local archive step without event deduplication
 
-`ArchiveDataEventsWithoutDeduplication` is a locally adapted, attributed version
-of ATSPM's `ArchiveDataEvents` with the same device/event batch contract and
-grouping by location, calendar hour, device ID and runtime event type. It creates
-the same `CompressedEventLogs<T>` rows and hourly timeline, but assigns the
-concrete `List<T>` through `CompressedEventLogBase.Data`, bypassing the generic
-accessor's HashSet conversion. The packaged models and database schema are unchanged.
+`ArchiveDataEventsWithoutDeduplication` is derived from ATSPM's
+`Atspm/Infrastructure/WorkflowSteps/ArchiveDataEvents.cs`; its upstream Apache
+license header is retained. The packaged models and database schema are unchanged.
 
-`EventBatchEnvelopeWorkflow` calls the step's envelope adapter, retaining origin
-envelopes for retries and avoiding per-event tuple allocation. The adapter and
-the ATSPM-compatible dataflow step share the same archive implementation. The
-old speed-only `ArchiveEnvelopeDataEvents` helper is replaced. The local EF
-writer also appends without value-based deduplication; replay fingerprints are
-used only to recognize one logical write, not to remove equal detections.
+`EventBatchEnvelopeWorkflow` calls the sole archive entry point, `ArchiveEnvelope`.
+It partitions an envelope's speed events by calendar hour, taking location and
+device ID from the envelope. It constructs `List<SpeedEvent>` and
+`CompressedEventLogs<SpeedEvent>` directly with the hourly timeline, without
+reflection or dynamic dispatch. Assigning through `CompressedEventLogBase.Data`
+bypasses the generic accessor's HashSet conversion and preserves every occurrence.
+The unused general-purpose device/event-array interface has been removed.
+
+Origin envelopes remain attached for retries. The local EF writer also appends
+without value-based deduplication; replay fingerprints recognize one logical
+write rather than remove equal detections.
 
 Validation: 171 Release tests passed, including the dataflow step, identical
 occurrences and repeated references, location/hour/device/type grouping,

@@ -8,7 +8,7 @@ changed during this work.
 | --- | --- |
 | Retries repeat committed envelopes | Repeated writes existed, but double-counting was not reproduced: the packaged Upsert unions events using value equality. Retries now track acknowledged rows by originating envelope and hour, and skip those rows during retries and poison isolation. The October 13 follow-up replaces value-equality union with retained before/after payloads, recognizing an uncertain committed result while preserving identical distinct events. |
 | Poison threshold aborts later healthy envelopes | Confirmed. Threshold exceptions are deferred until the remaining isolated envelopes have been attempted. |
-| Upsert ignores cancellation | Confirmed. The package repository API has no cancellation token. A local `EfEventLogWriter` uses the packaged context, model, primary keys and compression, passing the token to `FindAsync`, `AddAsync` and `SaveChangesAsync`, while preserving duplicate-event multiplicity through the base payload accessor. The shared packages remain unchanged; the later archive-step adaptation is local and retains upstream attribution. |
+| Upsert ignores cancellation | Confirmed. The package repository API has no cancellation token. A local `EfEventLogWriter` uses the packaged context, model, primary keys and compression, passing the token to `FindAsync`, `AddAsync` and `SaveChangesAsync`, while preserving duplicate-event multiplicity through the base payload accessor. The NuGet binaries remain unchanged. The local archive step is derived from ATSPM's `Atspm/Infrastructure/WorkflowSteps/ArchiveDataEvents.cs` and retains its upstream Apache license header. |
 | Deleted locations resolve to old versions | Confirmed. Current version selection now includes deletions; a current deletion suppresses the location instead of falling back. An older deletion does not suppress a later active version. |
 | Duplicate count stays zero | Confirmed. Rows tied at the current effective date now increment the duplicate counter. Historical versions are expected and are not counted as duplicate mappings. The highest location ID wins ties. |
 | Refresh cancellation logs failure | Confirmed. Caller cancellation propagates without a warning or refresh-failure increment. |
@@ -85,12 +85,15 @@ scripts are unchanged from the previously verified 27 scenarios.
 
 ## Explicit duplicate-preserving archive step
 
-At the user's request, the speed-specific archive helper was replaced with
-`ArchiveDataEventsWithoutDeduplication`, a local ATSPM-compatible workflow step.
-It uses ATSPM's grouping and compressed row formats while bypassing the generic
-Data accessor's HashSet conversion. Its envelope adapter is wired into the
-listener workflow. All 171 tests pass, including relational insert/update and
-retry tests proving every valid identical occurrence remains stored.
+`ArchiveDataEventsWithoutDeduplication` is derived from ATSPM's
+`Atspm/Infrastructure/WorkflowSteps/ArchiveDataEvents.cs`, retaining its upstream
+Apache license header. This is a local source adaptation; the NuGet binaries are
+unchanged. The production workflow uses only `ArchiveEnvelope`, now specialized
+for `SpeedEvent`. The unused general-purpose dataflow/device-event-array API has
+been removed. Typed lists, rows and timelines avoid reflection and dynamic
+dispatch while preserving hourly grouping and every identical occurrence.
+All 176 Release C# tests passed after specialization, including relational
+insert/update and retry tests that exercise this production path.
 
 ## IPv6 reception and conflict bookkeeping follow-up
 

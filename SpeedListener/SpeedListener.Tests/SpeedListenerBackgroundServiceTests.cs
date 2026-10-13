@@ -138,23 +138,41 @@ public sealed class SpeedListenerBackgroundServiceTests
         Assert.DoesNotContain(3002, logger.Events);
     }
 
+    [Fact]
+    public async Task SummariesReportUnknownOnlyForPreviousPeriod_AndWarnOncePerDetector()
+    {
+        var receiver = new ControlledReceiver { Payload = Convert.FromHexString("585329423939393932307E0D0D") };
+        var logger = new RecordingLogger(LogLevel.Information);
+        var service = CreateService(receiver, new StubMappingProvider(), new RecordingPublisher(), new SpeedPacketParser(),
+            logger: logger, summaryInterval: TimeSpan.FromMilliseconds(30), flushInterval: TimeSpan.FromMilliseconds(5));
+        await service.StartAsync(CancellationToken.None);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await logger.UnknownReset.Task.WaitAsync(timeout.Token);
+        await service.StopAsync(timeout.Token);
+        var periods = logger.UnknownSummaryCounts.ToArray();
+        Assert.Equal(1, periods.Sum());
+        Assert.Equal(0, periods.Last());
+        Assert.Equal(1, logger.Events.Count(id => id == 3033));
+    }
+
     private static SpeedListenerBackgroundService CreateService(
         ControlledReceiver receiver,
         StubMappingProvider mappings,
         RecordingPublisher publisher,
         ISpeedPacketParser? parser = null,
         SpeedListenerMetrics? metrics = null,
-        ILogger<SpeedListenerBackgroundService>? logger = null)
+        ILogger<SpeedListenerBackgroundService>? logger = null,
+        TimeSpan? summaryInterval = null, TimeSpan? flushInterval = null)
     {
         var options = Options.Create(new SpeedListenerConfiguration
         {
             ChannelCapacity = 10,
             BatchSize = 10,
-            FlushInterval = TimeSpan.FromMinutes(1),
+            FlushInterval = flushInterval ?? TimeSpan.FromMinutes(1),
             ShutdownFlushTimeout = TimeSpan.FromSeconds(2),
             ShutdownMaxWriteAttempts = 1,
             ArchiveParallelism = 1,
-            SummaryInterval = TimeSpan.FromHours(1)
+            SummaryInterval = summaryInterval ?? TimeSpan.FromHours(1)
         });
         metrics ??= new SpeedListenerMetrics(TimeProvider.System);
         var processor = new SpeedEventBatchProcessor(
@@ -177,6 +195,8 @@ public sealed class SpeedListenerBackgroundServiceTests
 
     private sealed class RecordingLogger(LogLevel minimumLevel) : ILogger<SpeedListenerBackgroundService>
     {
+        public TaskCompletionSource UnknownReset { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public System.Collections.Concurrent.ConcurrentQueue<long> UnknownSummaryCounts { get; } = new();
         public System.Collections.Concurrent.ConcurrentQueue<int> Events { get; } = new();
         public System.Collections.Concurrent.ConcurrentQueue<Dictionary<string, object?>> RejectedPackets { get; } = new();
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
@@ -185,6 +205,13 @@ public sealed class SpeedListenerBackgroundServiceTests
             Func<TState, Exception?, string> formatter)
         {
             Events.Enqueue(eventId.Id);
+            if (eventId.Id == 3006 && state is IEnumerable<KeyValuePair<string, object?>> summaryProperties)
+            {
+                var count = (long)summaryProperties.Single(pair => pair.Key == "unknown").Value!;
+                var hadUnknown = UnknownSummaryCounts.Any(value => value > 0);
+                UnknownSummaryCounts.Enqueue(count);
+                if (hadUnknown && count == 0) UnknownReset.TrySetResult();
+            }
             if (eventId.Id == 3002 && state is IEnumerable<KeyValuePair<string, object?>> properties)
                 RejectedPackets.Enqueue(properties.ToDictionary(pair => pair.Key, pair => pair.Value));
         }

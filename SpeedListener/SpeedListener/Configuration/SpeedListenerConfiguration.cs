@@ -16,7 +16,7 @@ public sealed class SpeedListenerConfiguration
     /// <summary>Gets or sets the time zone used for stored ATSPM event timestamps.</summary>
     public string EventTimeZoneId { get; set; } = "UTC";
     /// <summary>Maps exact source IP:port endpoints to six-digit detector IDs for untagged XS messages.</summary>
-    public Dictionary<string, string> UntaggedSpeedDetectorMappings { get; set; } = new();
+    public List<UntaggedSpeedDetectorMapping> UntaggedSpeedDetectorMappings { get; set; } = new();
     /// <summary>Gets or sets the maximum number of queued events.</summary>
     public int ChannelCapacity { get; set; } = 100_000;
     /// <summary>Gets or sets the size-triggered flush threshold.</summary>

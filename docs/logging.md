@@ -52,17 +52,17 @@ At Debug, each flushed batch logs one record per detector ID: event 3031
 the first-four-digit location identifier and event count. Mapped records describe
 routing, not a successful database commit; confirm archive logs separately.
 These per-batch diagnostics do not add records at Information, Warning or Error.
-Unknown detectors also produce Warning event 3033 (`SpeedListenerUnknownDetectorWarning`):
-the first batch for each detector warns immediately, then repeated warnings are
-limited to once per `DeviceMappingRefreshInterval` (normally five minutes).
-`EventCount` includes events skipped since the preceding warning, including
-suppressed batches. Each detector has an independent window. Pending counts are
-reported on the next nonempty batch at or after the window expires, even if
-that batch contains only mapped traffic; with no further traffic they remain
-unreported, but the aggregate `Unknown` counter still includes every skipped event.
-The window starts at the warning time and is independent of actual database
-refresh success. Idle entries expire; a service restart resets the warning windows.
-Mapped detectors still have no per-detector warnings.
+Unknown detectors produce Warning event 3033 (`SpeedListenerUnknownDetectorWarning`)
+once per detector per summary period. `EventCount` counts only events skipped in
+that period; the summary's `Unknown` count also resets each period. The default
+period is one minute (`SummaryInterval`). Graceful shutdown reports any remaining
+partial-period details. Mapped detectors still have no per-detector warnings.
+
+Memory is bounded to 256 detector details per period. Event 3034 reports all
+additional skipped events when that limit is reached, and the summary total
+still includes every event. Debug retains all per-batch detector details without
+sampling. Detector aggregation resets each period and does not retain IDs for
+the lifetime of the process. There is no five-minute per-detector warning cache.
 
 For example, search startup capture for `SpeedListenerUnknownDetector` and
 `SpeedListenerMappedDetector`, then filter `LocationIdentifier=5026` or `5271`.
@@ -74,6 +74,8 @@ retained in the batch and are not included in routing records.
 
 - Optional `ATSPM_STARTUP_LOG` capture supports `ATSPM_STARTUP_LOG_MAX_BYTES`.
   Zero means unlimited append-only capture; a positive byte count sets a cap.
+  Malformed, negative or overflowing values emit a diagnostic and fall back to
+  unlimited capture so startup succeeds and diagnostic data is preserved.
   The diagnostics helper defaults to unlimited troubleshooting capture and accepts
   `-MaxFileSizeMB` for a chosen cap (for example, 1024 for 1 GiB). A manually set
   capture path without a size setting defaults to 10 MiB. With a positive limit,

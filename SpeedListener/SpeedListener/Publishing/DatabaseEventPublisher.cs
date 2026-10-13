@@ -7,6 +7,7 @@ using SpeedListener.Services;
 using SpeedListener.Workflows;
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using Utah.Udot.Atspm.Data.Models;
 
 namespace SpeedListener.Publishing;
 
@@ -31,10 +32,11 @@ public sealed class DatabaseEventPublisher(
         if (batch.Count == 0) return;
         var attemptBudget = maxAttempts ?? options.Value.MaxWriteAttempts;
         var saved = new ConcurrentDictionary<(EventBatchEnvelope Envelope, DateTime Hour), byte>();
+        var rows = new ConcurrentDictionary<(EventBatchEnvelope Envelope, DateTime Hour), CompressedEventLogBase>();
 
         try
         {
-            await PublishWithRetryAsync(batch, parallelism, attemptBudget, saved, cancellationToken);
+            await PublishWithRetryAsync(batch, parallelism, attemptBudget, saved, rows, cancellationToken);
             foreach (var envelope in batch) _consecutiveDeviceDrops.TryRemove(envelope.DeviceId, out _);
         }
         catch (Exception ex) when (DatabaseFailureClassifier.Classify(ex) == DatabaseFailureKind.BatchData)
@@ -51,7 +53,7 @@ public sealed class DatabaseEventPublisher(
             {
                 try
                 {
-                    await PublishWithRetryAsync([envelope], parallelism, attemptBudget, saved, cancellationToken);
+                    await PublishWithRetryAsync([envelope], parallelism, attemptBudget, saved, rows, cancellationToken);
                     _consecutiveDeviceDrops.TryRemove(envelope.DeviceId, out _);
                 }
                 catch (Exception isolated) when (DatabaseFailureClassifier.Classify(isolated) == DatabaseFailureKind.BatchData)
@@ -66,6 +68,7 @@ public sealed class DatabaseEventPublisher(
 
     private async Task PublishWithRetryAsync(IReadOnlyList<EventBatchEnvelope> batch, int parallelism,
         int maxAttempts, ConcurrentDictionary<(EventBatchEnvelope Envelope, DateTime Hour), byte> saved,
+        ConcurrentDictionary<(EventBatchEnvelope Envelope, DateTime Hour), CompressedEventLogBase> rows,
         CancellationToken cancellationToken)
     {
         for (var attempt = 1; attempt <= maxAttempts; attempt++)
@@ -75,7 +78,7 @@ public sealed class DatabaseEventPublisher(
             var started = Stopwatch.GetTimestamp();
             try
             {
-                await ExecuteWorkflowAsync(batch, parallelism, saved, timeout.Token);
+                await ExecuteWorkflowAsync(batch, parallelism, saved, rows, timeout.Token);
                 var latency = Stopwatch.GetElapsedTime(started);
                 metrics.RecordPublished(batch.Count, latency);
                 _log.EnvelopesArchived(batch.Count, latency.TotalMilliseconds);
@@ -103,12 +106,14 @@ public sealed class DatabaseEventPublisher(
 
     private async Task ExecuteWorkflowAsync(IReadOnlyList<EventBatchEnvelope> batch, int parallelism,
         ConcurrentDictionary<(EventBatchEnvelope Envelope, DateTime Hour), byte> saved,
+        ConcurrentDictionary<(EventBatchEnvelope Envelope, DateTime Hour), CompressedEventLogBase> rows,
         CancellationToken cancellationToken)
     {
         var workflow = new EventBatchEnvelopeWorkflow(scopeFactory, parallelism, cancellationToken,
             options.Value.DatabaseWriteParallelism,
             (envelope, row) => saved.ContainsKey((envelope, row.Start)),
-            (envelope, row) => saved.TryAdd((envelope, row.Start), 0));
+            (envelope, row) => saved.TryAdd((envelope, row.Start), 0),
+            (envelope, row) => rows.GetOrAdd((envelope, row.Start), row));
         try
         {
             foreach (var envelope in batch)

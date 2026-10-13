@@ -128,6 +128,7 @@ public sealed class SpeedListenerBackgroundService(
         if (!stoppingToken.IsCancellationRequested)
             throw new InvalidOperationException("The UDP receiver stopped unexpectedly.");
 
+        LogUnknownDetails(metrics.TakeUnknownPeriod());
         _log.ListenerStopped(metrics.Received, metrics.Rejected, metrics.Dropped, metrics.Parsed, metrics.Actuation, metrics.UnmappedSpeed);
         }
         finally
@@ -140,27 +141,34 @@ public sealed class SpeedListenerBackgroundService(
     private async Task LogSummariesAsync(ChannelReader<SpeedEvent> reader, CancellationToken cancellationToken)
     {
         using var timer = new PeriodicTimer(options.Value.SummaryInterval);
-        long previousRejected = 0, previousUnknown = 0, previousDropped = 0, previousUnmappedSpeed = 0;
+        long previousRejected = 0, previousDropped = 0, previousUnmappedSpeed = 0;
         while (await timer.WaitForNextTickAsync(cancellationToken))
         {
             var rejected = metrics.Rejected;
-            var unknown = metrics.Unknown;
+            var unknown = metrics.TakeUnknownPeriod();
             var dropped = metrics.Dropped;
             _log.Summary(
-                metrics.Received, metrics.Parsed, metrics.Rejected, metrics.Unknown,
+                metrics.Received, metrics.Parsed, metrics.Rejected, unknown.Count,
                 reader.CanCount ? reader.Count : -1, metrics.Dropped, metrics.BatchesPublished,
                 metrics.EnvelopesPublished, metrics.AveragePublishLatencyMilliseconds, metrics.Retries,
                 metrics.PublishFailures, metrics.PoisonBatches, metrics.MappingAge?.TotalSeconds ?? -1,
                 metrics.MappingRefreshFailures, metrics.Actuation, metrics.UnmappedSpeed);
-            if (rejected > previousRejected || unknown > previousUnknown || dropped > previousDropped)
+            if (rejected > previousRejected || unknown.Count > 0 || dropped > previousDropped)
                 _log.LossSummary(
-                    rejected - previousRejected, unknown - previousUnknown, dropped - previousDropped);
+                    rejected - previousRejected, unknown.Count, dropped - previousDropped);
+            LogUnknownDetails(unknown);
             if (metrics.UnmappedSpeed > previousUnmappedSpeed)
                 _log.UnmappedSpeedSummary(metrics.UnmappedSpeed - previousUnmappedSpeed);
             previousUnmappedSpeed = metrics.UnmappedSpeed;
             previousRejected = rejected;
-            previousUnknown = unknown;
             previousDropped = dropped;
         }
+    }
+    private void LogUnknownDetails(UnknownDetectorPeriod period)
+    {
+        foreach (var detail in period.Details)
+            _log.UnknownDetectorWarning(detail.DetectorId, detail.LocationIdentifier, detail.EventCount);
+        if (period.AdditionalEventCount > 0)
+            _log.UnknownDetectorDetailsLimited(period.AdditionalEventCount, SpeedListenerMetrics.MaxUnknownDetectorDetails);
     }
 }

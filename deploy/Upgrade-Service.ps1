@@ -50,9 +50,17 @@ $wasRunning = $service.Status -eq 'Running'
 $port = if ($ExpectedPort) { $ExpectedPort } elseif ($wasRunning) {
     # Observe the effective binding, including environment, volume and CLI overrides.
     $bindings = @(Get-NetUDPEndpoint -OwningProcess $registration.ProcessId -ErrorAction SilentlyContinue)
+    $configuredPort = [int]$settings.SpeedListenerConfiguration.UdpPort
     $ports = @($bindings.LocalPort | Sort-Object -Unique)
-    if ($ports.Count -ne 1) { throw 'Cannot determine one effective UDP port. Supply -ExpectedPort.' }
-    [int]$ports[0]
+    if ($ports -contains $configuredPort) { $configuredPort }
+    else {
+        # Ignore connected/loopback client sockets when identifying the wildcard listener.
+        $listenerPorts = @($bindings | Where-Object { $_.LocalAddress -in @('0.0.0.0','::') } |
+            Select-Object -ExpandProperty LocalPort -Unique)
+        if ($listenerPorts.Count -eq 1) { [int]$listenerPorts[0] }
+        elseif ($ports.Count -eq 1) { [int]$ports[0] }
+        else { throw 'Cannot determine one effective listener UDP port. Supply -ExpectedPort.' }
+    }
 } else { [int]$settings.SpeedListenerConfiguration.UdpPort }
 if ($port -lt 1 -or $port -gt 65535) { throw 'Installed UDP port is invalid. Supply -ExpectedPort for a configuration override.' }
 $timeout = [TimeSpan]::FromSeconds($TimeoutSeconds)

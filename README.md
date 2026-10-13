@@ -58,7 +58,7 @@ format, for example `SpeedListenerConfiguration__UdpPort=10088`.
 | --- | ---: | --- |
 | `UdpPort` | `10088` | UDP bind port |
 | `EventTimeZoneId` | `UTC` | Time zone for stored events; set to the agency database's convention, for example `America/Denver` |
-| `UntaggedSpeedDetectorMappings` | `{}` | Explicit source IP:port to six-digit detector mapping for basic XS messages |
+| `UntaggedSpeedDetectorMappings` | `[]` | Explicit source IP:port to six-digit detector mapping for basic XS messages |
 | `ChannelCapacity` | `100000` | Maximum queued parsed events |
 | `BatchSize` | `5000` | Size-triggered flush threshold |
 | `FlushInterval` | `00:00:30` | Maximum age of a partial batch |
@@ -90,7 +90,7 @@ for sink limits and Docker configuration.
 
 Routing uses the first four characters of the packet detector identifier as the
 location identifier (for example, `502620` routes to `5026`). The current location
-version has the latest `Start` at or before the refresh time (UTC). A current
+version has the latest `Start` at or before the refresh time in `EventTimeZoneId`. A current
 deletion suppresses the mapping; older versions are not resurrected. Equal dates
 use the highest location ID and count the remaining tied rows as duplicates. Its lowest-ID SpeedSensor
 device is selected. Older versions are not used when the current version lacks a
@@ -119,16 +119,27 @@ the incomplete tail. Fragments are not reassembled across separate datagrams.
 Unexpected trailing data that is neither a terminator nor a valid timestamp is rejected.
 `Received` counts datagrams; `Parsed` counts queued events and `Rejected` counts
 invalid messages, so one datagram can produce multiple parsed or rejected records.
+The summary's `Unknown` and each unknown-detector warning count only the last
+summary period, resetting on each summary. Detector detail aggregation is capped
+at 256 IDs per period, with all additional skipped events counted in an overflow
+warning. Debug retains all per-batch detector details.
 Parsed events are mapped to ATSPM
 `SpeedSensor` devices, grouped by device, converted into hourly compressed event
 logs, and upserted through cancellable EF operations using the packaged ATSPM
-context, models, primary keys and compression. The local writer preserves ATSPM's
-value-equality union because the packaged repository methods do not accept
-cancellation tokens. Successfully acknowledged hourly rows are skipped on retry;
-uncertain commits are safe to replay because value-equal events are deduplicated.
+context, models, primary keys and compression. The local writer preserves every received event because the packaged generic Data accessors and
+repository Union would otherwise remove equal events. The writer uses the base
+payload accessor and cancellable EF operations. Successfully acknowledged hourly rows are skipped on retry;
+uncertain in-process commits are checked against the retained before/after row
+contents. Distinct events with identical values are preserved, including within
+one batch and across separate batches. A retry reuses the same logical row and
+skips it only when its exact intended contents are already stored. Unexpected
+outside changes fail rather than overwrite data. No database schema change is
+required; retry state lasts only for the current publish operation.
 
-Receipt and suffix timestamps are interpreted as instants in UTC, then converted
-to `EventTimeZoneId` for storage. UTC remains the default. For an agency database
+Receipt times and explicitly offset sensor timestamps are instants converted
+to `EventTimeZoneId` for storage. Offset-less sensor timestamps are interpreted
+as wall-clock time in that zone; DST gaps and ambiguous repeated times require
+an explicit offset and are rejected otherwise. UTC remains the default. For an agency database
 that stores local wall-clock times, configure its zone before ingesting data;
 non-UTC storage uses `DateTimeKind.Unspecified`. Match the existing database's
 convention, including its treatment of repeated hours when daylight saving ends.

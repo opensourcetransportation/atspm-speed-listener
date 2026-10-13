@@ -127,7 +127,14 @@ Two properties of the storage path are documented here so they are understood ra
 
 **Envelope `Start`/`End` are vestigial.** `SpeedBatchListenerBase` sets them from the group's minimum and maximum event timestamps, but `ArchiveEnvelopeDataEvents` ignores them and recomputes hour-aligned `Start`/`End` per bucket. The compressed-log row keys therefore come from the archive step, not the envelope. Preserve the envelope fields for contract compatibility, but do not rely on them.
 
-**`Upsert` deduplicates by value equality.** `SpeedEvent` implements equality over `{ LocationIdentifier, Timestamp, DetectorId, Mph, Kph }`, and `Upsert` unions old and new data through a `HashSet`. This makes retries idempotent, which is why the write path needs no distributed transaction. It also means two genuinely distinct vehicles detected by the same sensor at the same timestamp resolution and speed collapse into one stored event. This is a property of the ATSPM storage model, is present in the prototype, and is out of scope to change. Note it during the shadow-mode comparison so the magnitude is known.
+**Packaged `Upsert` and generic `Data` accessors deduplicate by value equality.**
+The listener's local writer deliberately bypasses both: it uses the base payload
+collection and appends every event, preserving identical detections within and
+across batches. In-process retries retain the logical compressed row and its
+before/after payloads, then recognize an already committed intended result.
+Unexpected outside changes stop the write instead of overwriting or appending
+again. This does not provide durable replay after process loss, and deployments
+must still use only one writer per stream and database.
 
 A third property constrains deployment rather than design: because `Upsert` is a read-modify-write against a shared row, two listeners writing the same device-hour concurrently lose events to last-write-wins. This makes single-writer cutover a correctness requirement, not just a duplicate-avoidance preference. See section 12.
 

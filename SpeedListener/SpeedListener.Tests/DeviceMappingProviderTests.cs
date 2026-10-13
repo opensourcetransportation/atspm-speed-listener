@@ -194,6 +194,25 @@ public sealed class DeviceMappingProviderTests
             metrics ?? new SpeedListenerMetrics(TimeProvider.System),
             NullLogger<DeviceMappingProvider>.Instance);
 
+    [Fact]
+    public async Task MappingCutoffUsesAgencyWallClockRatherThanUtc()
+    {
+        await using var services = CreateServices();
+        var old = Device(1, "old", DeviceTypes.SpeedSensor, "5271");
+        old.Location.Start = new DateTime(2026, 9, 3, 0, 0, 0);
+        var next = Device(2, "new", DeviceTypes.SpeedSensor, "5271");
+        next.Location.Start = new DateTime(2026, 9, 3, 8, 0, 0);
+        await SeedAsync(services, old, next);
+        var clock = new MutableTimeProvider(); // 12:00 UTC, 06:00 America/Denver.
+        var metrics = new SpeedListenerMetrics(clock);
+        var provider = new DeviceMappingProvider(services.GetRequiredService<IServiceScopeFactory>(),
+            Options.Create(new SpeedListenerConfiguration { EventTimeZoneId = "America/Denver" }),
+            clock, metrics, NullLogger<DeviceMappingProvider>.Instance);
+        Assert.Equal(1, (await provider.GetMappingsAsync(CancellationToken.None))["5271"].DeviceId);
+        clock.Advance(TimeSpan.FromHours(2));
+        Assert.Equal(2, (await provider.GetMappingsAsync(CancellationToken.None))["5271"].DeviceId);
+    }
+
     private static async Task SeedAsync(ServiceProvider services, params Device[] devices)
     {
         await using var scope = services.CreateAsyncScope();

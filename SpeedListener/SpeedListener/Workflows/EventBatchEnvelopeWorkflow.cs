@@ -19,7 +19,8 @@ public sealed class EventBatchEnvelopeWorkflow
         CancellationToken cancellationToken = default,
         int databaseWriteParallelism = 8,
         Func<EventBatchEnvelope, CompressedEventLogBase, bool>? alreadySaved = null,
-        Action<EventBatchEnvelope, CompressedEventLogBase>? onSaved = null)
+        Action<EventBatchEnvelope, CompressedEventLogBase>? onSaved = null,
+        Func<EventBatchEnvelope, CompressedEventLogBase, CompressedEventLogBase>? retainRow = null)
     {
         if (databaseWriteParallelism <= 0)
             throw new ArgumentOutOfRangeException(nameof(databaseWriteParallelism));
@@ -35,7 +36,7 @@ public sealed class EventBatchEnvelopeWorkflow
 
         Save = new ActionBlock<ArchivedRow>(async archived =>
         {
-            var compressed = archived.Row;
+            var compressed = retainRow?.Invoke(archived.Envelope, archived.Row) ?? archived.Row;
             if (alreadySaved?.Invoke(archived.Envelope, compressed) == true) return;
             // Upsert is read/merge/write. Never overlap writes for the same device,
             // including repeated envelopes for one hourly row.

@@ -24,16 +24,18 @@ For an untagged message, explicitly map its exact source IP and UDP port to a
 six-digit ATSPM detector ID in the existing `SpeedListenerConfiguration` section:
 
 ```json
-"UntaggedSpeedDetectorMappings": {
-  "192.0.2.10:2102": "502620",
-  "192.0.2.10:2103": "502622"
-}
+"UntaggedSpeedDetectorMappings": [
+  { "SourceAddress": "192.0.2.10", "SourcePort": 2102, "DetectorId": "502620" },
+  { "SourceAddress": "192.0.2.10", "SourcePort": 2103, "DetectorId": "502622" }
+]
 ```
 
 Addresses above are examples, not discovered sensor settings. Confirm the actual
 source endpoint and channel with the sensor administrator. Mapping uses the UDP
-source port, not the listener destination port. Use canonical endpoint notation
-(`[2001:db8::1]:2102` for IPv6). There is no IP-only fallback. If multiple sensors
+source port, not the listener destination port. For IPv6 use `"SourceAddress": "2001:db8::1"` with a separate numeric
+`SourcePort`. The list avoids colon-containing configuration dictionary keys;
+.NET treats colons as configuration path separators. The old dictionary format
+is no longer valid and must be converted before upgrading if it was configured. There is no IP-only fallback. If multiple sensors
 or channels share the same source endpoint, configure unique endpoints or tagged
 output; this setting cannot safely distinguish them. Restart after editing.
 

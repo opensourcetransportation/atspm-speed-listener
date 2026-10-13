@@ -36,3 +36,8 @@ do not control real services or change firewall rules. CI runs them under both
 PowerShell 7 and Windows PowerShell 5.1.
 
 See [the Windows service guide](../docs/windows-service.md) for the deployment workflow.
+
+Upgrade readiness observes the service's UDP bindings. If several sockets exist,
+it uses the configured port when present, otherwise a unique wildcard listener
+binding; connected or loopback client sockets do not make that binding ambiguous.
+Use `-ExpectedPort` when multiple listener bindings still cannot be distinguished.

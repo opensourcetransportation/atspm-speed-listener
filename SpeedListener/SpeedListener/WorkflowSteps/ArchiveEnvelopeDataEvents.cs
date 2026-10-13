@@ -30,12 +30,16 @@ public static class ArchiveEnvelopeDataEvents
             cancellationToken.ThrowIfCancellationRequested();
             var list = group.ToList();
             var timeline = new Timeline<StartEndRange>(list, TimeSpan.FromHours(1));
-            yield return new CompressedEventLogs<SpeedEvent>
+            var row = new CompressedEventLogs<SpeedEvent>
             {
                 LocationIdentifier = group.Key.LocationIdentifier,
                 Start = timeline.Start, End = timeline.End,
-                DataType = typeof(SpeedEvent), DeviceId = group.Key.DeviceId, Data = list
+                DataType = typeof(SpeedEvent), DeviceId = group.Key.DeviceId
             };
+            // The packaged generic Data accessor calls ToHashSet. Use the base
+            // payload collection to preserve distinct identical detections.
+            ((CompressedEventLogBase)row).Data = list;
+            yield return row;
         }
     }
 }

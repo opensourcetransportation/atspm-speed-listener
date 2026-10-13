@@ -40,9 +40,10 @@ public class Program
         var originalOutput = Console.Out;
         var originalError = Console.Error;
         var limitText = Environment.GetEnvironmentVariable("ATSPM_STARTUP_LOG_MAX_BYTES");
-        var limit = string.IsNullOrWhiteSpace(limitText) ? SizeLimitedDiagnosticStream.DefaultMaxBytes
-            : long.Parse(limitText, System.Globalization.CultureInfo.InvariantCulture);
-        if (limit < 0) throw new ArgumentOutOfRangeException(nameof(limit), "Diagnostic size must be nonnegative; zero means unlimited.");
+        var limit = ParseDiagnosticLimit(limitText);
+        if (!string.IsNullOrWhiteSpace(limitText) &&
+            (!long.TryParse(limitText, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var parsedLimit) || parsedLimit < 0))
+            Console.Error.WriteLine("Invalid ATSPM_STARTUP_LOG_MAX_BYTES; using unlimited diagnostic capture to preserve data.");
         Stream diagnosticStream = new FileStream(diagnosticPath, FileMode.OpenOrCreate, FileAccess.Write, FileShare.ReadWrite);
         if (limit == 0) diagnosticStream.Position = diagnosticStream.Length;
         else diagnosticStream = new SizeLimitedDiagnosticStream(diagnosticStream, limit);
@@ -68,6 +69,10 @@ public class Program
             Console.SetError(originalError);
         }
     }
+
+    internal static long ParseDiagnosticLimit(string? text) => string.IsNullOrWhiteSpace(text)
+        ? SizeLimitedDiagnosticStream.DefaultMaxBytes
+        : long.TryParse(text, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var value) && value >= 0 ? value : 0;
 
     internal static void TraceStartup(string message)
     {

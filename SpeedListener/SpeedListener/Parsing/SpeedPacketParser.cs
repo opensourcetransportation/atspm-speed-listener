@@ -10,7 +10,10 @@ namespace SpeedListener.Parsing;
 /// <summary>Parses legacy prefixed speed packets and compact packets beginning with XS.</summary>
 public sealed class SpeedPacketParser(IOptions<SpeedListenerConfiguration>? options = null) : ISpeedPacketParser
 {
-    private readonly IReadOnlyDictionary<string, string> _untaggedMappings = options?.Value.UntaggedSpeedDetectorMappings ?? new();
+    private readonly IReadOnlyDictionary<string, string> _untaggedMappings =
+        (options?.Value.UntaggedSpeedDetectorMappings ?? new()).ToDictionary(
+            mapping => new System.Net.IPEndPoint(System.Net.IPAddress.Parse(mapping.SourceAddress), mapping.SourcePort).ToString(),
+            mapping => mapping.DetectorId, StringComparer.Ordinal);
     private readonly TimeZoneInfo _eventTimeZone = TimeZoneInfo.FindSystemTimeZoneById(options?.Value.EventTimeZoneId ?? "UTC");
 
     /// <inheritdoc/>
@@ -108,10 +111,23 @@ public sealed class SpeedPacketParser(IOptions<SpeedListenerConfiguration>? opti
 
             if (!string.IsNullOrWhiteSpace(timestampText))
             {
-                if (!DateTimeOffset.TryParse(timestampText, CultureInfo.InvariantCulture,
-                    DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var parsedTimestamp))
-                    return SpeedPacketParseResult.Failure("Unexpected bytes after the detector identifier; expected a terminator or timestamp.");
-                timestamp = parsedTimestamp.UtcDateTime;
+                var hasOffset = System.Text.RegularExpressions.Regex.IsMatch(timestampText, @"(?:[zZ]|[+-]\d{2}:?\d{2})$");
+                if (hasOffset)
+                {
+                    if (!DateTimeOffset.TryParse(timestampText, CultureInfo.InvariantCulture,
+                            DateTimeStyles.AdjustToUniversal, out var parsedTimestamp))
+                        return SpeedPacketParseResult.Failure("Unexpected bytes after the detector identifier; expected a terminator or timestamp.");
+                    timestamp = parsedTimestamp.UtcDateTime;
+                }
+                else
+                {
+                    if (!DateTime.TryParse(timestampText, CultureInfo.InvariantCulture, DateTimeStyles.None, out var localTime))
+                        return SpeedPacketParseResult.Failure("Unexpected bytes after the detector identifier; expected a terminator or timestamp.");
+                    localTime = DateTime.SpecifyKind(localTime, DateTimeKind.Unspecified);
+                    if (_eventTimeZone.IsInvalidTime(localTime) || _eventTimeZone.IsAmbiguousTime(localTime))
+                        return SpeedPacketParseResult.Failure("Sensor timestamp is invalid or ambiguous in EventTimeZoneId; supply an explicit UTC offset.");
+                    timestamp = TimeZoneInfo.ConvertTimeToUtc(localTime, _eventTimeZone);
+                }
             }
         }
 

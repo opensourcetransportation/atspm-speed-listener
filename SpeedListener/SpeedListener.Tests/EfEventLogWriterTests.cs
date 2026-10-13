@@ -16,7 +16,7 @@ namespace SpeedListener.Tests;
 public sealed class EfEventLogWriterTests
 {
     [Fact]
-    public async Task Upsert_RoundTripsAcrossContexts_AccumulatesAndDeduplicatesReplay()
+    public async Task Upsert_RoundTripsAcrossContexts_PreservesDistinctIdenticalEvents()
     {
         var options = new DbContextOptionsBuilder<EventLogContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options;
@@ -27,7 +27,7 @@ public sealed class EfEventLogWriterTests
         }
         await using var verify = new InMemoryEventLogContext(options);
         var stored = Assert.IsType<CompressedEventLogs<SpeedEvent>>(await verify.Set<CompressedEventLogBase>().SingleAsync());
-        Assert.Equal(2, stored.Data.Count);
+        Assert.Equal(3, ((CompressedEventLogBase)stored).Data.Count());
     }
 
     [Fact]
@@ -51,7 +51,7 @@ public sealed class EfEventLogWriterTests
         });
         await using var verify = new InMemoryEventLogContext(dbOptions);
         var stored = Assert.IsType<CompressedEventLogs<SpeedEvent>>(await verify.Set<CompressedEventLogBase>().SingleAsync());
-        Assert.Single(stored.Data);
+        Assert.Single(((CompressedEventLogBase)stored).Data);
         Assert.Equal(1, metrics.Retries);
     }
 
@@ -69,6 +69,85 @@ public sealed class EfEventLogWriterTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => write.WaitAsync(TimeSpan.FromSeconds(5)));
         Assert.Equal(cancellation.Token, blocker.Token);
         Assert.Empty(await context.Set<CompressedEventLogBase>().ToListAsync());
+    }
+
+    [Fact]
+    public async Task Upsert_IdenticalEventsAcrossBatchesSurvive_AndReplayingSameLogicalRowIsIdempotent()
+    {
+        var options = new DbContextOptionsBuilder<EventLogContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options;
+        var first = Row("502620");
+        ((CompressedEventLogBase)first).Data = first.Data.Concat(first.Data).ToList();
+        var next = Row("502620");
+        foreach (var row in new[] { first, next, next })
+        {
+            await using var context = new InMemoryEventLogContext(options);
+            await new EfEventLogWriter(context).UpsertAsync(row, CancellationToken.None);
+        }
+        await using var verify = new InMemoryEventLogContext(options);
+        var stored = Assert.IsType<CompressedEventLogs<SpeedEvent>>(await verify.Set<CompressedEventLogBase>().SingleAsync());
+        Assert.Equal(3, ((CompressedEventLogBase)stored).Data.Count());
+    }
+
+    [Fact]
+    public async Task Publisher_LostUpdateAcknowledgement_PreservesIdenticalEventMultiplicity()
+    {
+        var name = Guid.NewGuid().ToString();
+        var root = new Microsoft.EntityFrameworkCore.Storage.InMemoryDatabaseRoot();
+        var seedOptions = new DbContextOptionsBuilder<EventLogContext>().UseInMemoryDatabase(name, root).Options;
+        await using (var seed = new InMemoryEventLogContext(seedOptions))
+            await new EfEventLogWriter(seed).UpsertAsync(Row("502620"), CancellationToken.None);
+        var options = new DbContextOptionsBuilder<EventLogContext>().UseInMemoryDatabase(name, root)
+            .AddInterceptors(new LoseFirstAcknowledgement()).Options;
+        await using var services = new ServiceCollection().AddScoped<EventLogContext>(_ => new InMemoryEventLogContext(options))
+            .AddScoped<IEventLogWriter, EfEventLogWriter>().BuildServiceProvider();
+        var metrics = new SpeedListenerMetrics(TimeProvider.System);
+        var publisher = new DatabaseEventPublisher(services.GetRequiredService<IServiceScopeFactory>(),
+            Options.Create(new SpeedListenerConfiguration { MaxWriteAttempts = 2 }), metrics, NullLogger<DatabaseEventPublisher>.Instance);
+        var row = Row("502620");
+        await publisher.PublishAsync(new EventBatchEnvelope
+        {
+            DeviceId = row.DeviceId, LocationIdentifier = row.LocationIdentifier, DataType = nameof(SpeedEvent),
+            Start = row.Start, End = row.End, Items = row.Data.Concat(row.Data).ToList()
+        });
+        await using var verify = new InMemoryEventLogContext(seedOptions);
+        var stored = Assert.IsType<CompressedEventLogs<SpeedEvent>>(await verify.Set<CompressedEventLogBase>().SingleAsync());
+        Assert.Equal(3, ((CompressedEventLogBase)stored).Data.Count());
+        Assert.Equal(1, metrics.Retries);
+    }
+
+    [Fact]
+    public async Task RetryingLogicalRowAfterOutsideChangeFailsInsteadOfOverwriting()
+    {
+        var options = new DbContextOptionsBuilder<EventLogContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options;
+        var row = Row("502620");
+        await using (var first = new InMemoryEventLogContext(options))
+            await new EfEventLogWriter(first).UpsertAsync(row, CancellationToken.None);
+        await using (var outside = new InMemoryEventLogContext(options))
+            await new EfEventLogWriter(outside).UpsertAsync(Row("502618"), CancellationToken.None);
+        await using var retry = new InMemoryEventLogContext(options);
+        await Assert.ThrowsAsync<DbUpdateConcurrencyException>(() => new EfEventLogWriter(retry).UpsertAsync(row, CancellationToken.None));
+        await using var verify = new InMemoryEventLogContext(options);
+        Assert.Equal(2, (await verify.Set<CompressedEventLogBase>().SingleAsync()).Data.Count());
+    }
+
+    [Fact]
+    public void PackagedCompressionConverterRoundTripPreservesIdenticalEvents()
+    {
+        var options = new DbContextOptionsBuilder<EventLogContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options;
+        using var context = new InMemoryEventLogContext(options);
+        var property = context.Model.FindEntityType(typeof(CompressedEventLogBase))!
+            .FindProperty(nameof(CompressedEventLogBase.Data))!;
+        var converter = property.GetTypeMapping().Converter!;
+        var row = Row("502620");
+        ((CompressedEventLogBase)row).Data = Enumerable.Repeat(row.Data.Single(), 3).ToList();
+        // EF prefers the packaged backing field, which retains List<SpeedEvent>.
+        // Calling the base getter instead materializes List<EventLogModelBase>
+        // and changes the collection metadata expected by the vendor binder.
+        Assert.NotNull(property.FieldInfo);
+        var encoded = converter.ConvertToProvider(property.FieldInfo.GetValue(row));
+        var decoded = Assert.IsAssignableFrom<IEnumerable<EventLogModelBase>>(converter.ConvertFromProvider(encoded));
+        Assert.Equal(3, decoded.Count());
+        Assert.All(decoded, item => Assert.IsType<SpeedEvent>(item));
     }
 
     private static CompressedEventLogs<SpeedEvent> Row(string detector) => new()

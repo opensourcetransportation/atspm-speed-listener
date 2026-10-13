@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Configuration;
 using SpeedListener.Configuration;
 
 namespace SpeedListener.Tests;
@@ -74,17 +75,54 @@ public sealed class HostBootstrapperTests
     }
 
     [Theory]
-    [InlineData("sensor:2103", "502620", false)]
-    [InlineData("10.0.0.1:0", "502620", false)]
-    [InlineData("10.0.0.1:2103", "5026AA", false)]
-    [InlineData("10.0.0.1:2103", "50262", false)]
-    [InlineData("10.0.0.1:2103", "502620", true)]
-    [InlineData("[::1]:2103", "502620", true)]
-    public void IsValidListenerConfiguration_ValidatesUntaggedEndpointMapping(string endpoint, string detector, bool valid)
+    [InlineData("sensor", 2103, "502620", false)]
+    [InlineData("10.0.0.1", 0, "502620", false)]
+    [InlineData("10.0.0.1", 2103, "5026AA", false)]
+    [InlineData("10.0.0.1", 2103, "50262", false)]
+    [InlineData("10.0.0.1", 2103, "502620", true)]
+    [InlineData("::1", 2103, "502620", true)]
+    public void IsValidListenerConfiguration_ValidatesUntaggedEndpointMapping(string address, int port, string detector, bool valid)
     {
         var config = ValidConfiguration();
-        config.UntaggedSpeedDetectorMappings[endpoint] = detector;
+        config.UntaggedSpeedDetectorMappings.Add(new() { SourceAddress = address, SourcePort = port, DetectorId = detector });
         Assert.Equal(valid, HostBootstrapper.IsValidListenerConfiguration(config));
+    }
+
+    [Fact]
+    public void JsonBinding_UntaggedEndpointListProducesWorkingParser_AndRejectsDuplicateEndpoints()
+    {
+        var json = """
+            { "SpeedListenerConfiguration": { "UntaggedSpeedDetectorMappings": [
+              { "SourceAddress": "127.0.0.1", "SourcePort": 2103, "DetectorId": "527148" }
+            ] } }
+            """;
+        using var input = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(json));
+        var configuration = new Microsoft.Extensions.Configuration.ConfigurationBuilder().AddJsonStream(input).Build();
+        var config = configuration.GetSection("SpeedListenerConfiguration").Get<SpeedListenerConfiguration>()!;
+        Assert.True(HostBootstrapper.IsValidListenerConfiguration(config));
+        var parser = new SpeedListener.Parsing.SpeedPacketParser(Microsoft.Extensions.Options.Options.Create(config));
+        var result = parser.Parse(new SpeedListener.Receivers.UdpDatagram(Convert.FromHexString("585332507E0D0D"),
+            new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, 2103), DateTimeOffset.UtcNow));
+        Assert.Equal("527148", result.Event!.DetectorId);
+        config.UntaggedSpeedDetectorMappings.Add(new() { SourceAddress = "127.0.0.1", SourcePort = 2103, DetectorId = "527132" });
+        Assert.False(HostBootstrapper.IsValidListenerConfiguration(config));
+    }
+
+    [Fact]
+    public void JsonBinding_LegacyColonDictionaryCannotSilentlyProduceEmptyValidMapping()
+    {
+        using var input = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(
+            """{ "SpeedListenerConfiguration": { "UntaggedSpeedDetectorMappings": { "192.0.2.10:2102": "502620" } } }"""));
+        var configuration = new Microsoft.Extensions.Configuration.ConfigurationBuilder().AddJsonStream(input).Build();
+        var config = configuration.GetSection("SpeedListenerConfiguration").Get<SpeedListenerConfiguration>()!;
+        Assert.False(HostBootstrapper.IsValidListenerConfiguration(config));
+    }
+
+    [Fact]
+    public void GeneratorHostSetsDatabaseTimestampCompatibilityBeforeBuildingServices()
+    {
+        using var host = HostBootstrapper.BuildGeneratorHost();
+        Assert.True(AppContext.TryGetSwitch("Npgsql.EnableLegacyTimestampBehavior", out var enabled) && enabled);
     }
 
     private static SpeedListenerConfiguration ValidConfiguration() => new()

@@ -10,7 +10,25 @@ public sealed class SpeedListenerMetrics(TimeProvider timeProvider)
     public void RecordActuation() => Interlocked.Increment(ref _actuation);
     public void RecordUnmappedSpeed() => Interlocked.Increment(ref _unmappedSpeed);
 
-    private long _received, _parsed, _rejected, _unknown, _dropped;
+    internal const int MaxUnknownDetectorDetails = 256;
+    private readonly object _unknownPeriodLock = new();
+    private readonly Dictionary<string, UnknownDetectorDetail> _unknownDetails = new(StringComparer.Ordinal);
+    private long _unknownPeriod, _unknownWithoutDetails;
+
+    /// <summary>Consumes and resets unknown counts and details for the previous summary period atomically.</summary>
+    public UnknownDetectorPeriod TakeUnknownPeriod()
+    {
+        lock (_unknownPeriodLock)
+        {
+            var snapshot = new UnknownDetectorPeriod(_unknownPeriod, _unknownDetails.Values.ToArray(), _unknownWithoutDetails);
+            _unknownPeriod = 0;
+            _unknownWithoutDetails = 0;
+            _unknownDetails.Clear();
+            return snapshot;
+        }
+    }
+
+    private long _received, _parsed, _rejected, _dropped;
     private long _batchesPublished, _envelopesPublished, _publishLatencyTicks;
     private long _retries, _publishFailures, _poisonBatches, _mappingRefreshFailures;
     private long _mappingRefreshedAtTicks;
@@ -18,7 +36,7 @@ public sealed class SpeedListenerMetrics(TimeProvider timeProvider)
     public long Received => Interlocked.Read(ref _received);
     public long Parsed => Interlocked.Read(ref _parsed);
     public long Rejected => Interlocked.Read(ref _rejected);
-    public long Unknown => Interlocked.Read(ref _unknown);
+    public long Unknown { get { lock (_unknownPeriodLock) return _unknownPeriod; } }
     public long Dropped => Interlocked.Read(ref _dropped);
     public long BatchesPublished => Interlocked.Read(ref _batchesPublished);
     public long EnvelopesPublished => Interlocked.Read(ref _envelopesPublished);
@@ -41,7 +59,18 @@ public sealed class SpeedListenerMetrics(TimeProvider timeProvider)
     public void RecordReceived() => Interlocked.Increment(ref _received);
     public void RecordParsed() => Interlocked.Increment(ref _parsed);
     public void RecordRejected() => Interlocked.Increment(ref _rejected);
-    public void RecordUnknown(long count) => Interlocked.Add(ref _unknown, count);
+    public void RecordUnknown(long count, string? detectorId = null, string? locationIdentifier = null)
+    {
+        lock (_unknownPeriodLock)
+        {
+            _unknownPeriod += count;
+            if (detectorId is not null && _unknownDetails.TryGetValue(detectorId, out var existing))
+                _unknownDetails[detectorId] = existing with { EventCount = existing.EventCount + count };
+            else if (detectorId is not null && _unknownDetails.Count < MaxUnknownDetectorDetails)
+                _unknownDetails.Add(detectorId, new UnknownDetectorDetail(detectorId, locationIdentifier ?? string.Empty, count));
+            else _unknownWithoutDetails += count;
+        }
+    }
     public void RecordDropped() => Interlocked.Increment(ref _dropped);
     public void RecordPublished(int envelopes, TimeSpan latency)
     {
@@ -55,4 +84,8 @@ public sealed class SpeedListenerMetrics(TimeProvider timeProvider)
     public void RecordMappingRefresh() => Interlocked.Exchange(ref _mappingRefreshedAtTicks, timeProvider.GetUtcNow().UtcTicks);
     public void RecordMappingRefreshFailure() => Interlocked.Increment(ref _mappingRefreshFailures);
 }
+/// <summary>Unknown routing details bounded to one summary period.</summary>
+public sealed record UnknownDetectorDetail(string DetectorId, string LocationIdentifier, long EventCount);
+/// <summary>Atomic summary-period counters, including events exceeding the detail limit.</summary>
+public sealed record UnknownDetectorPeriod(long Count, IReadOnlyList<UnknownDetectorDetail> Details, long AdditionalEventCount);
 #pragma warning restore CS1591

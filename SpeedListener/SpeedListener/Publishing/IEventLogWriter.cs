@@ -5,6 +5,6 @@ namespace SpeedListener.Publishing;
 /// <summary>Persists one hourly row with cooperative database cancellation.</summary>
 public interface IEventLogWriter
 {
-    /// <summary>Unions speed events into the matching ATSPM archive row.</summary>
+    /// <summary>Appends speed events to the matching ATSPM archive row while preserving duplicate-event multiplicity.</summary>
     Task UpsertAsync(CompressedEventLogBase input, CancellationToken cancellationToken);
 }

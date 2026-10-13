@@ -71,8 +71,12 @@ public partial class SpeedListenerLogMessages(ILogger logger)
     public partial void MappedDetector(string? detectorId, string locationIdentifier, int deviceId, long eventCount);
 
     [LoggerMessage(EventId = 3033, EventName = "Unknown Detector Warning", Level = LogLevel.Warning,
-        Message = "SpeedListenerUnknownDetectorWarning DetectorId={detectorId} LocationIdentifier={locationIdentifier} EventCount={eventCount}; events skipped because no current speed-device mapping was available")]
+        Message = "SpeedListenerUnknownDetectorWarning DetectorId={detectorId} LocationIdentifier={locationIdentifier} EventCount={eventCount}; events skipped during the last summary period because no current speed-device mapping was available")]
     public partial void UnknownDetectorWarning(string detectorId, string locationIdentifier, long eventCount);
+
+    [LoggerMessage(EventId = 3034, EventName = "Unknown Detector Detail Limit", Level = LogLevel.Warning,
+        Message = "SpeedListenerUnknownDetectorDetailsLimited AdditionalUnknownEvents={eventCount} DetailLimit={detailLimit}; counts include all events, additional detector IDs remain available at Debug")]
+    public partial void UnknownDetectorDetailsLimited(long eventCount, int detailLimit);
 
     [LoggerMessage(EventId = 3040, EventName = "Batch Rejected", Level = LogLevel.Warning,
         Message = "Database rejected a batch of {envelopeCount} envelopes; isolating the device-attributable failure")]

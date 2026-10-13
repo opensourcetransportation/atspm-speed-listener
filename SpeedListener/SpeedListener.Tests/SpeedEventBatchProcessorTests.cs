@@ -161,11 +161,11 @@ public sealed class SpeedEventBatchProcessorTests
     }
 
     [Theory]
-    [InlineData(LogLevel.Debug, 6)]
-    [InlineData(LogLevel.Information, 2)]
-    [InlineData(LogLevel.Warning, 2)]
+    [InlineData(LogLevel.Debug, 4)]
+    [InlineData(LogLevel.Information, 0)]
+    [InlineData(LogLevel.Warning, 0)]
     [InlineData(LogLevel.Error, 0)]
-    public async Task DetectorDiagnostics_WarnForUnknownAndKeepMappedDetailsAtDebug(LogLevel level, int expectedRecords)
+    public async Task DetectorDiagnostics_AccumulateSummaryDetailsAndKeepBatchDetailsAtDebug(LogLevel level, int expectedRecords)
     {
         var logger = new DiagnosticLogger(level);
         var metrics = new SpeedListenerMetrics(TimeProvider.System);
@@ -179,6 +179,9 @@ public sealed class SpeedEventBatchProcessorTests
         Assert.Equal(3, metrics.Unknown);
         Assert.Equal(2, Assert.Single(publisher.Batches).Count);
         Assert.Equal(expectedRecords, logger.Records.Count);
+        var period = metrics.TakeUnknownPeriod();
+        Assert.Equal(3, period.Count);
+        Assert.Equal(new[] { "999920", "999922" }, period.Details.Select(detail => detail.DetectorId));
         if (level == LogLevel.Debug)
         {
             var unknown = logger.Records.Where(record => record.Id == 3031).ToArray();
@@ -188,70 +191,6 @@ public sealed class SpeedEventBatchProcessorTests
             Assert.Equal(new[] { "502620", "527148" }, logger.Records.Where(record => record.Id == 3032)
                 .Select(record => record.Data["detectorId"]));
         }
-    }
-
-    [Fact]
-    public async Task UnknownWarnings_ThrottlePerDetector_AccumulateCountsAndExpireIdleEntries()
-    {
-        var clock = new ManualTimeProvider();
-        var logger = new DiagnosticLogger(LogLevel.Warning);
-        var metrics = new SpeedListenerMetrics(clock);
-        var publisher = new RecordingPublisher();
-        var processor = CreateProcessor(publisher, metrics: metrics, logger: logger, clock: clock);
-        async Task Batch(params string[] ids)
-        {
-            var channel = Channel.CreateUnbounded<SpeedEvent>();
-            foreach (var id in ids) channel.Writer.TryWrite(Event(id, clock.GetUtcNow().UtcDateTime, 30));
-            channel.Writer.Complete();
-            await processor.ProcessAsync(channel.Reader, CancellationToken.None);
-        }
-
-        await Batch("999920", "999920");
-        Assert.Equal(2L, Assert.Single(logger.Records).Data["eventCount"]);
-        clock.Advance(TimeSpan.FromMinutes(1));
-        await Batch("999920", "999922");
-        Assert.Equal(2, logger.Records.Count); // A different detector warns immediately.
-        clock.Advance(TimeSpan.FromMinutes(3));
-        await Batch("999920", "999920");
-        Assert.Equal(2, logger.Records.Count);
-        clock.Advance(TimeSpan.FromMinutes(1));
-        await Batch("999920");
-        var repeat = logger.Records.Last();
-        Assert.Equal("999920", repeat.Data["detectorId"]);
-        Assert.Equal(4L, repeat.Data["eventCount"]); // All suppressed events plus this batch.
-        Assert.Equal(7, metrics.Unknown);
-        clock.Advance(TimeSpan.FromMinutes(5));
-        await Batch("502620"); // Expire the idle unknown-warning entries.
-        await Batch("999920");
-        Assert.Equal(1L, logger.Records.Last().Data["eventCount"]);
-        Assert.Equal(4, logger.Records.Count);
-        Assert.Single(Assert.Single(publisher.Batches));
-    }
-
-    [Fact]
-    public async Task UnknownWarnings_PendingCountsAreReportedWhenOnlyMappedTrafficContinues()
-    {
-        var clock = new ManualTimeProvider();
-        var logger = new DiagnosticLogger(LogLevel.Warning);
-        var processor = CreateProcessor(new RecordingPublisher(), logger: logger, clock: clock);
-        foreach (var id in new[] { "999920", "999920", "502620" })
-        {
-            var channel = Channel.CreateUnbounded<SpeedEvent>();
-            channel.Writer.TryWrite(Event(id, clock.GetUtcNow().UtcDateTime, 30));
-            channel.Writer.Complete();
-            await processor.ProcessAsync(channel.Reader, CancellationToken.None);
-            if (id == "999920" && logger.Records.Count == 1)
-                clock.Advance(TimeSpan.FromMinutes(3));
-        }
-        Assert.Equal(2, logger.Records.Count);
-        Assert.All(logger.Records, record => Assert.Equal(1L, record.Data["eventCount"]));
-    }
-
-    private sealed class ManualTimeProvider : TimeProvider
-    {
-        private DateTimeOffset _now = new(2026, 10, 13, 12, 0, 0, TimeSpan.Zero);
-        public override DateTimeOffset GetUtcNow() => _now;
-        public void Advance(TimeSpan duration) => _now += duration;
     }
 
     private sealed class DiagnosticLogger(LogLevel minimum) : ILogger<SpeedEventBatchProcessor>

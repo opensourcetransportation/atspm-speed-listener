@@ -6,9 +6,9 @@ changed during this work.
 
 | Finding | Result and change |
 | --- | --- |
-| Retries repeat committed envelopes | Repeated writes existed, but double-counting was not reproduced: the packaged Upsert unions events using value equality. Retries now track acknowledged rows by originating envelope and hour, and skip those rows during retries and poison isolation. A lost acknowledgement remains replayable through the same value-equality union. |
+| Retries repeat committed envelopes | Repeated writes existed, but double-counting was not reproduced: the packaged Upsert unions events using value equality. Retries now track acknowledged rows by originating envelope and hour, and skip those rows during retries and poison isolation. The October 13 follow-up replaces value-equality union with retained before/after payloads, recognizing an uncertain committed result while preserving identical distinct events. |
 | Poison threshold aborts later healthy envelopes | Confirmed. Threshold exceptions are deferred until the remaining isolated envelopes have been attempted. |
-| Upsert ignores cancellation | Confirmed. The package repository API has no cancellation token. A local `EfEventLogWriter` uses the packaged context, model, primary keys and compression, passing the token to `FindAsync`, `AddAsync` and `SaveChangesAsync`, while retaining union semantics. No package source was copied. |
+| Upsert ignores cancellation | Confirmed. The package repository API has no cancellation token. A local `EfEventLogWriter` uses the packaged context, model, primary keys and compression, passing the token to `FindAsync`, `AddAsync` and `SaveChangesAsync`, while preserving duplicate-event multiplicity through the base payload accessor. No package source was copied. |
 | Deleted locations resolve to old versions | Confirmed. Current version selection now includes deletions; a current deletion suppresses the location instead of falling back. An older deletion does not suppress a later active version. |
 | Duplicate count stays zero | Confirmed. Rows tied at the current effective date now increment the duplicate counter. Historical versions are expected and are not counted as duplicate mappings. The highest location ID wins ties. |
 | Refresh cancellation logs failure | Confirmed. Caller cancellation propagates without a warning or refresh-failure increment. |
@@ -35,3 +35,26 @@ test the new writer against the agency's database provider. UDP and the bounded
 in-memory queue remain nondurable. A shutdown deadline can still leave queued
 events unwritten, and cancellation cannot undo a commit already accepted by the
 server. One writer per device stream/database remains required.
+
+## October 13 follow-up review
+
+| Finding | Resolution and regression coverage |
+| --- | --- |
+| Colon-containing endpoint keys do not bind | Use a list of SourceAddress, SourcePort and DetectorId. A real JSON configuration binding test parses an untagged packet; legacy nonempty dictionary input and duplicate endpoints fail validation. |
+| Mapping cutoff always UTC | Convert the clock to EventTimeZoneId before comparing effective dates. A Denver version-boundary test verifies no early switchover. |
+| Offset-less sensor timestamp assumed UTC | Interpret it in EventTimeZoneId; explicit offsets still represent instants. DST gaps and repeated ambiguous times require an offset. |
+| Generator lacks Npgsql compatibility | Set the timestamp compatibility switch before building generator services, matching the listener. |
+| Union removes legitimate identical events | Append through the base payload collection and retain each logical row across retries. Both generic accessors and packaged Union are bypassed. Tests cover separate batches, identical events in one batch, lost insert/update acknowledgements, outside-write conflicts, and the actual compression converter/backing-field round trip. |
+| Extra UDP sockets block upgrade | Prefer the configured observed port, otherwise a unique wildcard listener, and retain ExpectedPort for genuine ambiguity. Two extra-socket regression scenarios pass. |
+| Unbounded unknown-detector warning cache | Remove the lifetime cache. Aggregate at most 256 detector details per summary period; all additional events remain counted and get an aggregate warning. Debug retains full batch details. |
+| Invalid diagnostic size crashes startup | Validate the value without throwing; malformed, negative or overflowing values emit a diagnostic and use unlimited capture. |
+
+The summary Unknown counter and per-detector warning EventCount now represent
+only the preceding SummaryInterval, normally one minute. Both reset atomically
+on each summary; graceful shutdown reports pending partial-period details.
+
+Validation: 148 Release application tests passed; 14 upgrade/rollback, 7
+switchover and 6 installer/capture scenarios passed under PowerShell 7 and Windows PowerShell 5.1. Script
+tests mock service/firewall operations. No GCP configuration or event-log data
+was changed for this review work. These changes do not add database tables or
+provide durable cross-process replay; use one writer per stream/database.

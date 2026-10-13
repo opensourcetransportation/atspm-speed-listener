@@ -31,7 +31,10 @@ function Get-NetUDPEndpoint {
     [CmdletBinding()]
     param([int]$LocalPort, [int]$OwningProcess)
     if ($OwningProcess) {
-        foreach ($boundPort in $script:observedPorts) { [pscustomobject]@{ OwningProcess = 42; LocalPort = $boundPort } }
+        foreach ($boundPort in $script:observedPorts) {
+            $address = if ($script:loopbackPorts -contains $boundPort) { '127.0.0.1' } else { '0.0.0.0' }
+            [pscustomobject]@{ OwningProcess = 42; LocalPort = $boundPort; LocalAddress = $address }
+        }
         return
     }
     if ($LocalPort -ne $script:expectedPort) { throw 'Installed UDP port was changed.' }
@@ -51,6 +54,7 @@ function Assert-Equal($Expected, $Actual, [string]$Message) {
 function New-Scenario([string]$Name, [string]$State = 'Running', [int]$Port = 15000, [string]$ServiceName = 'AtspmSpeedListener') {
     $script:expectedPort = $Port
     $script:observedPorts = @($Port)
+    $script:loopbackPorts = @()
     $script:expectedServiceName = $ServiceName
     $script:originalSettings = '{"SpeedListenerConfiguration":{"UdpPort":' + $Port + '}}'
     $root = Join-Path $testRoot $Name
@@ -128,6 +132,18 @@ $script:observedPorts = @(27000, 27001)
 & $upgrade -SourcePath $script:source -InstallPath $script:install -TimeoutSeconds 1 -ExpectedPort 27000
 Assert-Preserved
 
+New-Scenario 'extra-config'
+$script:observedPorts = @($script:expectedPort, 55001)
+& $upgrade -SourcePath $script:source -InstallPath $script:install -TimeoutSeconds 1
+Assert-Preserved
+
+New-Scenario 'extra-override'
+$script:expectedPort = 26000
+$script:observedPorts = @(26000, 55001)
+$script:loopbackPorts = @(55001)
+& $upgrade -SourcePath $script:source -InstallPath $script:install -TimeoutSeconds 1
+Assert-Preserved
+
 New-Scenario 'ambiguous-port'
 $script:observedPorts = @(27000, 27001)
 Assert-UpgradeFails
@@ -172,5 +188,5 @@ $script:source = $script:install
 Assert-UpgradeFails
 Assert-Equal 0 $script:stopCount 'Overlapping paths rejected before stopping'
 
-Write-Host 'PASS: twelve upgrade scenarios. No real services were controlled.'
+Write-Host 'PASS: fourteen upgrade scenarios. No real services were controlled.'
 Write-Host "Test files: $testRoot"

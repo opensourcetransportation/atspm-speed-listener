@@ -40,19 +40,25 @@ namespace SpeedListener;
 public static class HostBootstrapper
 {
     /// <summary>Builds configuration-only services for generator discovery; starts no listener or writer.</summary>
-    public static IHost BuildGeneratorHost() => Host.CreateDefaultBuilder()
+    public static IHost BuildGeneratorHost()
+    {
+        AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
+        return Host.CreateDefaultBuilder()
         .UseContentRoot(AppContext.BaseDirectory)
         .ApplyVolumeConfiguration(Path.Combine(AppContext.BaseDirectory, "Configuration"))
         .ConfigureServices((hostContext, services) =>
         {
             services.AddOptions<SpeedListenerConfiguration>()
-                .Bind(hostContext.Configuration.GetSection(nameof(SpeedListenerConfiguration)));
+                .Bind(hostContext.Configuration.GetSection(nameof(SpeedListenerConfiguration)))
+                .Validate(IsValidListenerConfiguration, "Speed listener configuration is missing or invalid.")
+                .ValidateOnStart();
             services.AddSingleton(TimeProvider.System);
             services.AddSingleton<SpeedListenerMetrics>();
             services.AddAtspmDbContext(hostContext);
             services.AddSingleton<IDeviceMappingProvider, DeviceMappingProvider>();
             services.AddScoped<DatabaseSpeedTargetProvider>();
         }).Build();
+    }
 
     /// <summary>Runs the speed listener host.</summary>
     public static async Task RunListenerHostAsync(Action<SpeedListenerConfiguration> configureAction)
@@ -124,9 +130,13 @@ public static class HostBootstrapper
         try { TimeZoneInfo.FindSystemTimeZoneById(configuration.EventTimeZoneId); }
         catch (Exception ex) when (ex is TimeZoneNotFoundException or InvalidTimeZoneException or ArgumentException)
         { return false; }
-        if (configuration.UntaggedSpeedDetectorMappings is null || configuration.UntaggedSpeedDetectorMappings.Any(pair =>
-            !System.Net.IPEndPoint.TryParse(pair.Key, out var endpoint) || endpoint.Port is <= 0 or > 65535 ||
-            pair.Value is null || pair.Value.Length != 6 || pair.Value.Any(c => c < '0' || c > '9')))
+        if (configuration.UntaggedSpeedDetectorMappings is null || configuration.UntaggedSpeedDetectorMappings.Any(mapping =>
+            mapping is null || !System.Net.IPAddress.TryParse(mapping.SourceAddress, out _) || mapping.SourcePort is <= 0 or > 65535 ||
+            mapping.DetectorId is null || mapping.DetectorId.Length != 6 || mapping.DetectorId.Any(c => c < '0' || c > '9')))
+            return false;
+        if (configuration.UntaggedSpeedDetectorMappings.Select(mapping =>
+                new System.Net.IPEndPoint(System.Net.IPAddress.Parse(mapping.SourceAddress), mapping.SourcePort).ToString())
+            .Distinct(StringComparer.Ordinal).Count() != configuration.UntaggedSpeedDetectorMappings.Count)
             return false;
         if (configuration.UdpPort is <= 0 or > 65535 ||
             configuration.ChannelCapacity <= 0 ||

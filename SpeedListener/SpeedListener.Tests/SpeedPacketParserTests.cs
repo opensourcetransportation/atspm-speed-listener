@@ -273,7 +273,7 @@ public sealed class SpeedPacketParserTests
         var config = new SpeedListener.Configuration.SpeedListenerConfiguration
         {
             EventTimeZoneId = "America/Denver",
-            UntaggedSpeedDetectorMappings = new() { ["127.0.0.1:10088"] = "502620" }
+            UntaggedSpeedDetectorMappings = new() { new() { SourceAddress = "127.0.0.1", SourcePort = 10088, DetectorId = "502620" } }
         };
         var parser = new SpeedPacketParser(Microsoft.Extensions.Options.Options.Create(config));
         var result = parser.Parse(packet);
@@ -302,11 +302,39 @@ public sealed class SpeedPacketParserTests
     {
         var parser = new SpeedPacketParser(Microsoft.Extensions.Options.Options.Create(
             new SpeedListener.Configuration.SpeedListenerConfiguration
-            { UntaggedSpeedDetectorMappings = new() { ["127.0.0.1:10088"] = "502620" } }));
+            { UntaggedSpeedDetectorMappings = new() { new() { SourceAddress = "127.0.0.1", SourcePort = 10088, DetectorId = "502620" } } }));
         var result = parser.Parse(Datagram(Convert.FromHexString("5A34FFFFFF0004050F0451000100006B585332507E0D0D")));
         Assert.False(result.IsSuccess);
         Assert.False(result.IsActuation);
         Assert.False(result.IsUnmappedSpeed);
+    }
+
+    [Theory]
+    [InlineData("2026-07-02T12:30:00", 12)]
+    [InlineData("2026-07-02T18:30:00Z", 12)]
+    [InlineData("2026-07-02T12:30:00-06:00", 12)]
+    [InlineData("2026-01-02T12:30:00", 12)]
+    public void Parse_SensorTimestampUsesAgencyZoneUnlessOffsetSupplied(string timestamp, int hour)
+    {
+        var parser = new SpeedPacketParser(Microsoft.Extensions.Options.Options.Create(
+            new SpeedListener.Configuration.SpeedListenerConfiguration { EventTimeZoneId = "America/Denver" }));
+        var packet = Packet("502620", 30, 48).Concat(Encoding.ASCII.GetBytes("~" + timestamp)).ToArray();
+        var result = parser.Parse(Datagram(packet));
+        Assert.True(result.IsSuccess);
+        Assert.Equal(hour, result.Event!.Timestamp.Hour);
+        Assert.Equal(DateTimeKind.Unspecified, result.Event.Timestamp.Kind);
+    }
+
+    [Theory]
+    [InlineData("2026-03-08T02:30:00")]
+    [InlineData("2026-11-01T01:30:00")]
+    public void Parse_OffsetlessDaylightSavingGapOrFoldRequiresOffset(string timestamp)
+    {
+        var parser = new SpeedPacketParser(Microsoft.Extensions.Options.Options.Create(
+            new SpeedListener.Configuration.SpeedListenerConfiguration { EventTimeZoneId = "America/Denver" }));
+        var result = parser.Parse(Datagram(Packet("502620", 30, 48).Concat(Encoding.ASCII.GetBytes("~" + timestamp)).ToArray()));
+        Assert.False(result.IsSuccess);
+        Assert.Contains("explicit UTC offset", result.Error);
     }
 
     private static byte[] Packet(string detectorId, byte mph, byte kph)

@@ -446,3 +446,23 @@ After successful cutover, remove the EventListener executable and listener-speci
 5. Confirm acceptable loss behavior during database outages and whether a durable spool is required before production.
 
 Resolved by dropping the API path and no longer open: Data API authentication, idempotency, request contract, and TLS handling.
+
+## Local archive step without event deduplication
+
+`ArchiveDataEventsWithoutDeduplication` is a locally adapted, attributed version
+of ATSPM's `ArchiveDataEvents` with the same device/event batch contract and
+grouping by location, calendar hour, device ID and runtime event type. It creates
+the same `CompressedEventLogs<T>` rows and hourly timeline, but assigns the
+concrete `List<T>` through `CompressedEventLogBase.Data`, bypassing the generic
+accessor's HashSet conversion. The packaged models and database schema are unchanged.
+
+`EventBatchEnvelopeWorkflow` calls the step's envelope adapter, retaining origin
+envelopes for retries and avoiding per-event tuple allocation. The adapter and
+the ATSPM-compatible dataflow step share the same archive implementation. The
+old speed-only `ArchiveEnvelopeDataEvents` helper is replaced. The local EF
+writer also appends without value-based deduplication; replay fingerprints are
+used only to recognize one logical write, not to remove equal detections.
+
+Validation: 171 Release tests passed, including the dataflow step, identical
+occurrences and repeated references, location/hour/device/type grouping,
+cancellation, actual compression and SQLite insert/update replay behavior.

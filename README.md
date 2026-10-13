@@ -123,6 +123,15 @@ The summary's `UnknownSinceLast` and each unknown-detector warning count only th
 summary period, resetting on each summary. Detector detail aggregation is capped
 at 256 IDs per period, with all additional skipped events counted in an overflow
 warning. Debug retains all per-batch detector details.
+Archiving uses the local `ArchiveDataEventsWithoutDeduplication` workflow step,
+adapted from ATSPM's `ArchiveDataEvents`. It retains the same location/hour/device/
+event-type grouping, row types and timeline, assigning each concrete event list
+through the base payload accessor without the generic model's HashSet conversion.
+Its ATSPM-compatible device/event-array interface and the listener envelope
+adapter share the same implementation; the adapter avoids per-event tuple
+allocation. Every occurrence is preserved, including separate identical events
+and repeated references. Retry recognition remains a separate write operation.
+
 Parsed events are mapped to ATSPM
 `SpeedSensor` devices, grouped by device, converted into hourly compressed event
 logs, and upserted through cancellable EF operations using the packaged ATSPM

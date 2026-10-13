@@ -8,7 +8,7 @@ changed during this work.
 | --- | --- |
 | Retries repeat committed envelopes | Repeated writes existed, but double-counting was not reproduced: the packaged Upsert unions events using value equality. Retries now track acknowledged rows by originating envelope and hour, and skip those rows during retries and poison isolation. The October 13 follow-up replaces value-equality union with retained before/after payloads, recognizing an uncertain committed result while preserving identical distinct events. |
 | Poison threshold aborts later healthy envelopes | Confirmed. Threshold exceptions are deferred until the remaining isolated envelopes have been attempted. |
-| Upsert ignores cancellation | Confirmed. The package repository API has no cancellation token. A local `EfEventLogWriter` uses the packaged context, model, primary keys and compression, passing the token to `FindAsync`, `AddAsync` and `SaveChangesAsync`, while preserving duplicate-event multiplicity through the base payload accessor. No package source was copied. |
+| Upsert ignores cancellation | Confirmed. The package repository API has no cancellation token. A local `EfEventLogWriter` uses the packaged context, model, primary keys and compression, passing the token to `FindAsync`, `AddAsync` and `SaveChangesAsync`, while preserving duplicate-event multiplicity through the base payload accessor. The shared packages remain unchanged; the later archive-step adaptation is local and retains upstream attribution. |
 | Deleted locations resolve to old versions | Confirmed. Current version selection now includes deletions; a current deletion suppresses the location instead of falling back. An older deletion does not suppress a later active version. |
 | Duplicate count stays zero | Confirmed. Rows tied at the current effective date now increment the duplicate counter. Historical versions are expected and are not counted as duplicate mappings. The highest location ID wins ties. |
 | Refresh cancellation logs failure | Confirmed. Caller cancellation propagates without a warning or refresh-failure increment. |
@@ -82,3 +82,12 @@ with the unmodified packaged EventLogContext, plus compressed in-memory
 snapshots. The self-contained Windows generator rejects invalid configuration
 before database discovery; offline target preview sends no packets. Deployment
 scripts are unchanged from the previously verified 27 scenarios.
+
+## Explicit duplicate-preserving archive step
+
+At the user's request, the speed-specific archive helper was replaced with
+`ArchiveDataEventsWithoutDeduplication`, a local ATSPM-compatible workflow step.
+It uses ATSPM's grouping and compressed row formats while bypassing the generic
+Data accessor's HashSet conversion. Its envelope adapter is wired into the
+listener workflow. All 171 tests pass, including relational insert/update and
+retry tests proving every valid identical occurrence remains stored.

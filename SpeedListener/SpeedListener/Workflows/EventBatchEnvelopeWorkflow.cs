@@ -27,7 +27,7 @@ public sealed class EventBatchEnvelopeWorkflow
             throw new ArgumentOutOfRangeException(nameof(databaseWriteParallelism));
         var deviceLocks = new ConcurrentDictionary<int, SemaphoreSlim>();
         Archive = new TransformManyBlock<EventBatchEnvelope, ArchivedRow>(
-            envelope => ArchiveEnvelopeDataEvents.Archive(envelope, cancellationToken)
+            envelope => ArchiveDataEventsWithoutDeduplication.ArchiveEnvelope(envelope, cancellationToken)
                 .Select(row => new ArchivedRow(envelope, row)),
             new ExecutionDataflowBlockOptions
             {

@@ -45,7 +45,10 @@ The older sample emitter is also available:
 dotnet run --project SpeedListener/SpeedListener -- emitter --host 127.0.0.1 --port 10088
 ```
 
-The listener supports UDP only. The emitter's TCP option is retained for test
+The listener supports UDP only. On IPv6-capable systems it binds a dual-stack
+`::` socket, receiving IPv4 and IPv6 on the same port. IPv4-mapped sources are
+normalized to IPv4 for source-endpoint matching. On IPv4-only systems it binds
+IPv4 and rejects pure IPv6 source mappings during validation. The emitter's TCP option is retained for test
 utility compatibility, but there is no TCP listener.
 
 ## Configuration
@@ -146,7 +149,11 @@ recognizes its intended prefix after a commit, including subsequent appends by
 another writer. An unresolvable outside change logs a device-hour conflict and
 skips only that uncertain contribution; other hours and devices continue.
 WriteConflicts and ConflictEvents expose those cases, which may already be
-committed. Partially conflicted envelopes are excluded from EnvelopesPublished. No database schema change is
+committed. RowsPublished and EventsPublished count each confirmed device-hour
+contribution and its events once, including successful hours of partial envelopes
+and commits recognized after a lost acknowledgement. EnvelopesPublished counts
+fully archived envelopes. A conflict or poison failure prevents that device's
+poison-drop history from being reset, including during isolated retries. No database schema change is
 required; retry state lasts only for the current publish operation.
 
 Receipt times and explicitly offset sensor timestamps are instants converted

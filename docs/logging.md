@@ -145,6 +145,12 @@ identifies an uncertain device-hour contribution after an outside row change.
 That contribution may already have committed; it is not appended a second time
 when its outcome cannot be established. Other hours and devices continue, and
 an envelope with any conflicted hour is excluded from `EnvelopesPublished`.
+`RowsPublished` and `EventsPublished` independently count all confirmed row
+contributions and events, including successful hours of partial envelopes and
+commits confirmed after acknowledgement loss. They update at row completion,
+so a later batch failure does not erase progress. Retries/isolation cannot count
+the same logical row twice. A device's poison history resets only after a clean
+publish; a conflict, even alongside a committed hour, cannot clear that history.
 
 The summary now names its interval counter `UnknownSinceLast`, replacing the
 previous mixed-semantics `Unknown` field. Other summary counters remain cumulative

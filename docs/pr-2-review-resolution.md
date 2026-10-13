@@ -91,3 +91,23 @@ It uses ATSPM's grouping and compressed row formats while bypassing the generic
 Data accessor's HashSet conversion. Its envelope adapter is wired into the
 listener workflow. All 171 tests pass, including relational insert/update and
 retry tests proving every valid identical occurrence remains stored.
+
+## IPv6 reception and conflict bookkeeping follow-up
+
+The receiver now binds a dual-stack IPv6 socket when supported, otherwise IPv4.
+Mapped IPv4 source addresses normalize consistently in configuration and received
+packets; pure IPv6 mappings are rejected on IPv4-only systems. Real loopback
+tests send IPv4 and IPv6 untagged messages to the same port and resolve both
+source mappings, including mapped-IPv4 configuration forms.
+
+Publication metrics count confirmed device-hour contributions and events at row
+completion, guarded by the logical row tracker across retries and isolation.
+Partial envelopes still contribute their good hours to RowsPublished and
+EventsPublished; EnvelopesPublished retains its fully-archived meaning. Conflicts
+cannot clear a device's poison history, either on the normal path or while
+isolating a bad batch. Regression tests alternate poison failures with a partial
+conflict and verify the original threshold is still reached. A separate device's
+poison failure cannot cause the conflicted device to be treated as successful.
+
+Validation: 176 Release C# tests passed; IPv6 loopback tests ran on an IPv6-capable
+host. Deployment scripts remain unchanged from their prior validated scenarios.

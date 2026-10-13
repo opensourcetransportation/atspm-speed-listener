@@ -34,7 +34,11 @@ Addresses above are examples, not discovered sensor settings. Confirm the actual
 source endpoint and channel with the sensor administrator. Mapping uses the UDP
 source port, not the listener destination port. IPv4 must use four decimal octets
 without leading zeros; short, integer, octal and hexadecimal forms are rejected.
-IPv6 literals are also accepted. For IPv6 use `"SourceAddress": "2001:db8::1"` with a separate numeric
+IPv6 literals are also accepted when the operating system supports IPv6. The
+receiver uses one dual-stack socket on those systems; `Get-NetUDPEndpoint` may
+show `::` rather than `0.0.0.0`. IPv4-mapped source addresses normalize to IPv4,
+so a mapped address and its plain IPv4 form cannot configure different detector
+IDs for the same endpoint. Pure IPv6 mappings fail validation on IPv4-only systems. For IPv6 use `"SourceAddress": "2001:db8::1"` with a separate numeric
 `SourcePort`. The list avoids colon-containing configuration dictionary keys;
 .NET treats colons as configuration path separators. The old dictionary format
 is no longer valid and must be converted before upgrading if it was configured. There is no IP-only fallback. If multiple sensors

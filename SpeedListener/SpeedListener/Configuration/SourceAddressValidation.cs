@@ -20,6 +20,12 @@ internal static class SourceAddressValidation
         return true;
     }
 
+    internal static string EndpointKey(IPAddress address, int port) =>
+        new IPEndPoint(address.IsIPv4MappedToIPv6 ? address.MapToIPv4() : address, port).ToString();
+
+    internal static bool IsSupported(string? text) => TryParse(text, out var address) &&
+        (address!.AddressFamily != AddressFamily.InterNetworkV6 || address.IsIPv4MappedToIPv6 || Socket.OSSupportsIPv6);
+
     private static bool IsDottedQuad(string text)
     {
         var parts = text.Split('.');

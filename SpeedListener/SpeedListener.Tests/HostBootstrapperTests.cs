@@ -151,6 +151,15 @@ public sealed class HostBootstrapperTests
         Assert.Equal(valid, HostBootstrapper.IsValidListenerConfiguration(config));
     }
 
+    [Fact]
+    public void MappedIpv4AndPlainIpv4CannotConfigureDifferentDetectorsForSameSource()
+    {
+        var config = ValidConfiguration();
+        config.UntaggedSpeedDetectorMappings.Add(new() { SourceAddress = "127.0.0.1", SourcePort = 2103, DetectorId = "502620" });
+        config.UntaggedSpeedDetectorMappings.Add(new() { SourceAddress = "::ffff:127.0.0.1", SourcePort = 2103, DetectorId = "527148" });
+        Assert.False(HostBootstrapper.IsValidListenerConfiguration(config));
+    }
+
     private static SpeedListenerConfiguration ValidConfiguration() => new()
     {
         UdpPort = 10088,

@@ -248,8 +248,47 @@ public sealed class DatabaseEventPublisherTests
         Assert.Equal(1, metrics.WriteConflicts);
         Assert.Equal(1, metrics.ConflictEvents);
         Assert.Equal(1, metrics.EnvelopesPublished); // Only the fully archived device 2 envelope.
+        Assert.Equal(2, metrics.RowsPublished); // Includes the good hour of the partial envelope.
+        Assert.Equal(2, metrics.EventsPublished);
         Assert.Equal(0, metrics.PoisonBatches);
         Assert.Equal(0, metrics.PublishFailures);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ConflictsDoNotResetPoisonHistory_InNormalOrIsolatedPublishing(bool isolate)
+    {
+        var phase = 0;
+        var writer = new Mock<IEventLogWriter>();
+        writer.Setup(value => value.UpsertAsync(It.IsAny<CompressedEventLogBase>(), It.IsAny<CancellationToken>()))
+            .Returns((CompressedEventLogBase row, CancellationToken _) => {
+                if (phase == 1 && row.DeviceId == 1)
+                    return row.Start.Hour == 18
+                        ? Task.FromException(new EventLogWriteConflictException("uncertain commit"))
+                        : Task.CompletedTask;
+                return Task.FromException(new FakeDbException("23505"));
+            });
+        await using var services = new ServiceCollection().AddScoped(_ => writer.Object).BuildServiceProvider();
+        var metrics = new SpeedListenerMetrics(TimeProvider.System);
+        var publisher = new DatabaseEventPublisher(services.GetRequiredService<IServiceScopeFactory>(),
+            Options.Create(new SpeedListenerConfiguration { MaxWriteAttempts = 1, PoisonDeviceFailureThreshold = 2, DatabaseWriteParallelism = 1 }),
+            metrics, NullLogger<DatabaseEventPublisher>.Instance);
+        await publisher.PublishAsync(CreateEnvelope()); // First poison drop for device 1.
+        phase = 1;
+        var partial = CreateEnvelope();
+        partial.Items = partial.Items.Concat(new[] { new SpeedEvent {
+            DetectorId = "D1", Timestamp = partial.Start.AddHours(1), Mph = 30, Kph = 48
+        } }).ToList();
+        await publisher.PublishAsync(isolate ? new[] { partial, CreateEnvelope(2, "L2", "D2") } : new[] { partial }, parallelism: 1);
+        Assert.Equal(1, metrics.WriteConflicts);
+        Assert.Equal(1, metrics.RowsPublished);
+        Assert.Equal(1, metrics.EventsPublished);
+        Assert.Equal(0, metrics.EnvelopesPublished);
+        phase = 2;
+        var error = await Assert.ThrowsAsync<PoisonDeviceException>(() => publisher.PublishAsync(CreateEnvelope()));
+        Assert.Equal(1, error.DeviceId);
+        Assert.Equal(1, metrics.RowsPublished); // Retry/isolation must not count the good hour twice.
     }
 
     private static DatabaseEventPublisher CreatePublisher(Mock<IEventLogRepository> repository,

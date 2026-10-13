@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using SpeedListener.LogMessages;
 using System.Net.Sockets;
+using System.Net;
 
 namespace SpeedListener.Receivers;
 
@@ -8,7 +9,7 @@ namespace SpeedListener.Receivers;
 public sealed class UdpDatagramReceiver(int port, TimeProvider timeProvider, ILogger<UdpDatagramReceiver> logger)
     : IUdpDatagramReceiver
 {
-    private readonly UdpClient _client = new(port);
+    private readonly UdpClient _client = BindSocket(port);
     private readonly SpeedListenerLogMessages _log = new(logger);
     private bool _disposed;
 
@@ -24,7 +25,11 @@ public sealed class UdpDatagramReceiver(int port, TimeProvider timeProvider, ILo
             {
                 var result = await _client.ReceiveAsync(cancellationToken);
                 await onDatagram(
-                    new UdpDatagram(result.Buffer, result.RemoteEndPoint, timeProvider.GetUtcNow()),
+                    new UdpDatagram(result.Buffer,
+                        result.RemoteEndPoint.Address.IsIPv4MappedToIPv6
+                            ? new IPEndPoint(result.RemoteEndPoint.Address.MapToIPv4(), result.RemoteEndPoint.Port)
+                            : result.RemoteEndPoint,
+                        timeProvider.GetUtcNow()),
                     cancellationToken);
             }
         }
@@ -34,6 +39,19 @@ public sealed class UdpDatagramReceiver(int port, TimeProvider timeProvider, ILo
         catch (ObjectDisposedException) when (cancellationToken.IsCancellationRequested || _disposed)
         {
         }
+    }
+
+    private static UdpClient BindSocket(int port)
+    {
+        if (!Socket.OSSupportsIPv6) return new UdpClient(port);
+        var client = new UdpClient(AddressFamily.InterNetworkV6);
+        try
+        {
+            client.Client.DualMode = true;
+            client.Client.Bind(new IPEndPoint(IPAddress.IPv6Any, port));
+            return client;
+        }
+        catch { client.Dispose(); throw; }
     }
 
     /// <inheritdoc/>

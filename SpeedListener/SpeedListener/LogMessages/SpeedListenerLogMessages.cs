@@ -29,10 +29,10 @@ public partial class SpeedListenerLogMessages(ILogger logger)
     public partial void ListenerStopped(long received, long rejected, long dropped, long parsed, long actuation, long unmappedSpeed);
 
     [LoggerMessage(EventId = 3006, EventName = "Listener Summary", Level = LogLevel.Information,
-        Message = "SpeedListenerSummary Received={received} Parsed={parsed} Rejected={rejected} UnknownSinceLast={unknownSinceLast} ChannelDepth={channelDepth} Dropped={dropped} BatchesPublished={batchesPublished} EnvelopesPublished={envelopesPublished} PublishLatencyMs={publishLatencyMs} Retries={retries} PublishFailures={publishFailures} PoisonBatches={poisonBatches} MappingAgeSeconds={mappingAgeSeconds} MappingRefreshFailures={mappingRefreshFailures} Actuation={actuation} UnmappedSpeed={unmappedSpeed} WriteConflicts={writeConflicts} ConflictEvents={conflictEvents}")]
+        Message = "SpeedListenerSummary Received={received} Parsed={parsed} Rejected={rejected} UnknownSinceLast={unknownSinceLast} ChannelDepth={channelDepth} Dropped={dropped} BatchesPublished={batchesPublished} EnvelopesPublished={envelopesPublished} PublishLatencyMs={publishLatencyMs} Retries={retries} PublishFailures={publishFailures} PoisonBatches={poisonBatches} MappingAgeSeconds={mappingAgeSeconds} MappingRefreshFailures={mappingRefreshFailures} Actuation={actuation} UnmappedSpeed={unmappedSpeed} WriteConflicts={writeConflicts} ConflictEvents={conflictEvents} RowsPublished={rowsPublished} EventsPublished={eventsPublished}")]
     public partial void Summary(long received, long parsed, long rejected, long unknownSinceLast, int channelDepth,
         long dropped, long batchesPublished, long envelopesPublished, double publishLatencyMs, long retries,
-        long publishFailures, long poisonBatches, double mappingAgeSeconds, long mappingRefreshFailures, long actuation, long unmappedSpeed, long writeConflicts, long conflictEvents);
+        long publishFailures, long poisonBatches, double mappingAgeSeconds, long mappingRefreshFailures, long actuation, long unmappedSpeed, long writeConflicts, long conflictEvents, long rowsPublished, long eventsPublished);
 
     [LoggerMessage(EventId = 3007, EventName = "Listener Loss Summary", Level = LogLevel.Warning,
         Message = "SpeedListenerLossSummary RejectedSinceLast={rejectedSinceLast} UnknownSinceLast={unknownSinceLast} DroppedSinceLast={droppedSinceLast}")]
@@ -83,8 +83,8 @@ public partial class SpeedListenerLogMessages(ILogger logger)
     public partial void BatchRejected(int envelopeCount, Exception exception);
 
     [LoggerMessage(EventId = 3041, EventName = "Envelopes Archived", Level = LogLevel.Information,
-        Message = "Archived {count} speed-event envelopes in {elapsedMilliseconds} ms")]
-    public partial void EnvelopesArchived(int count, double elapsedMilliseconds);
+        Message = "Archived {rowCount} speed-event device-hour rows containing {eventCount} events; FullyArchivedEnvelopes={count} in {elapsedMilliseconds} ms")]
+    public partial void EnvelopesArchived(int count, int rowCount, long eventCount, double elapsedMilliseconds);
 
     [LoggerMessage(EventId = 3042, EventName = "Database Write Retry", Level = LogLevel.Warning,
         Message = "Transient database write failure on attempt {attempt}; retrying in {delay}")]

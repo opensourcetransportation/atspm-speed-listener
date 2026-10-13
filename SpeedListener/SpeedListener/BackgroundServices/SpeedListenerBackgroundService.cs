@@ -152,7 +152,7 @@ public sealed class SpeedListenerBackgroundService(
                 reader.CanCount ? reader.Count : -1, metrics.Dropped, metrics.BatchesPublished,
                 metrics.EnvelopesPublished, metrics.AveragePublishLatencyMilliseconds, metrics.Retries,
                 metrics.PublishFailures, metrics.PoisonBatches, metrics.MappingAge?.TotalSeconds ?? -1,
-                metrics.MappingRefreshFailures, metrics.Actuation, metrics.UnmappedSpeed, metrics.WriteConflicts, metrics.ConflictEvents);
+                metrics.MappingRefreshFailures, metrics.Actuation, metrics.UnmappedSpeed, metrics.WriteConflicts, metrics.ConflictEvents, metrics.RowsPublished, metrics.EventsPublished);
             if (rejected > previousRejected || unknown.Count > 0 || dropped > previousDropped)
                 _log.LossSummary(
                     rejected - previousRejected, unknown.Count, dropped - previousDropped);

@@ -250,6 +250,8 @@ public sealed class EfEventLogWriterTests
         var stored = await verify.Set<CompressedEventLogBase>().SingleAsync();
         Assert.Equal(seedExistingRow ? 3 : 2, stored.Data.Count());
         Assert.Equal(1, metrics.Retries);
+        Assert.Equal(1, metrics.RowsPublished);
+        Assert.Equal(2, metrics.EventsPublished);
         Assert.Equal(0, metrics.WriteConflicts);
     }
 

@@ -12,7 +12,7 @@ public sealed class SpeedPacketParser(IOptions<SpeedListenerConfiguration>? opti
 {
     private readonly IReadOnlyDictionary<string, string> _untaggedMappings =
         (options?.Value.UntaggedSpeedDetectorMappings ?? new()).ToDictionary(
-            mapping => new System.Net.IPEndPoint(System.Net.IPAddress.Parse(mapping.SourceAddress), mapping.SourcePort).ToString(),
+            mapping => SourceAddressValidation.EndpointKey(System.Net.IPAddress.Parse(mapping.SourceAddress), mapping.SourcePort),
             mapping => mapping.DetectorId, StringComparer.Ordinal);
     private readonly TimeZoneInfo _eventTimeZone = TimeZoneInfo.FindSystemTimeZoneById(options?.Value.EventTimeZoneId ?? "UTC");
 
@@ -75,7 +75,10 @@ public sealed class SpeedPacketParser(IOptions<SpeedListenerConfiguration>? opti
             && data.Length == speedOffset + 5 && data[^3] == (byte)'~' && data[^2] == 13 && data[^1] == 13;
         if (untagged)
         {
-            if (!_untaggedMappings.TryGetValue(datagram.RemoteEndPoint.ToString() ?? string.Empty, out var mappedDetector))
+            var endpointKey = datagram.RemoteEndPoint is System.Net.IPEndPoint remote
+                ? SourceAddressValidation.EndpointKey(remote.Address, remote.Port)
+                : datagram.RemoteEndPoint.ToString() ?? string.Empty;
+            if (!_untaggedMappings.TryGetValue(endpointKey, out var mappedDetector))
                 return SpeedPacketParseResult.UnmappedSpeed();
             if (mappedDetector.Length != 6 || mappedDetector.Any(c => c < '0' || c > '9'))
                 return SpeedPacketParseResult.Failure("Configured untagged speed detector identifier must contain six digits.");

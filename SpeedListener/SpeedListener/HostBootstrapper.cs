@@ -139,11 +139,11 @@ public static class HostBootstrapper
         catch (Exception ex) when (ex is TimeZoneNotFoundException or InvalidTimeZoneException or ArgumentException)
         { return false; }
         if (configuration.UntaggedSpeedDetectorMappings is null || configuration.UntaggedSpeedDetectorMappings.Any(mapping =>
-            mapping is null || !SourceAddressValidation.TryParse(mapping.SourceAddress, out _) || mapping.SourcePort is <= 0 or > 65535 ||
+            mapping is null || !SourceAddressValidation.IsSupported(mapping.SourceAddress) || mapping.SourcePort is <= 0 or > 65535 ||
             mapping.DetectorId is null || mapping.DetectorId.Length != 6 || mapping.DetectorId.Any(c => c < '0' || c > '9')))
             return false;
         if (configuration.UntaggedSpeedDetectorMappings.Select(mapping =>
-                new System.Net.IPEndPoint(System.Net.IPAddress.Parse(mapping.SourceAddress), mapping.SourcePort).ToString())
+                SourceAddressValidation.EndpointKey(System.Net.IPAddress.Parse(mapping.SourceAddress), mapping.SourcePort))
             .Distinct(StringComparer.Ordinal).Count() != configuration.UntaggedSpeedDetectorMappings.Count)
             return false;
         if (configuration.UdpPort is <= 0 or > 65535 ||

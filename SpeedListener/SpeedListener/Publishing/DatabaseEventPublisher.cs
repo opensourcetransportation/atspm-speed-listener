@@ -32,13 +32,13 @@ public sealed class DatabaseEventPublisher(
         if (batch.Count == 0) return;
         var attemptBudget = maxAttempts ?? options.Value.MaxWriteAttempts;
         var saved = new ConcurrentDictionary<(EventBatchEnvelope Envelope, DateTime Hour), byte>();
-        var conflicts = new ConcurrentDictionary<EventBatchEnvelope, byte>();
+        var conflicts = new ConcurrentDictionary<(EventBatchEnvelope Envelope, DateTime Hour), byte>();
         var rows = new ConcurrentDictionary<(EventBatchEnvelope Envelope, DateTime Hour), CompressedEventLogBase>();
 
         try
         {
             await PublishWithRetryAsync(batch, parallelism, attemptBudget, saved, rows, conflicts, cancellationToken);
-            foreach (var envelope in batch) _consecutiveDeviceDrops.TryRemove(envelope.DeviceId, out _);
+            ResetCleanDevices(batch, conflicts, new HashSet<int>());
         }
         catch (Exception ex) when (DatabaseFailureClassifier.Classify(ex) == DatabaseFailureKind.BatchData)
         {
@@ -50,19 +50,23 @@ public sealed class DatabaseEventPublisher(
 
             _log.BatchRejected(batch.Count, ex);
             PoisonDeviceException? thresholdFailure = null;
+            var completed = new List<EventBatchEnvelope>();
+            var failedDevices = new HashSet<int>();
             foreach (var envelope in batch)
             {
                 try
                 {
                     await PublishWithRetryAsync([envelope], parallelism, attemptBudget, saved, rows, conflicts, cancellationToken);
-                    _consecutiveDeviceDrops.TryRemove(envelope.DeviceId, out _);
+                    completed.Add(envelope);
                 }
                 catch (Exception isolated) when (DatabaseFailureClassifier.Classify(isolated) == DatabaseFailureKind.BatchData)
                 {
+                    failedDevices.Add(envelope.DeviceId);
                     try { DropPoisonBatch(envelope, isolated); }
                     catch (PoisonDeviceException threshold) { thresholdFailure ??= threshold; }
                 }
             }
+            ResetCleanDevices(completed, conflicts, failedDevices);
             if (thresholdFailure is not null) throw thresholdFailure;
         }
     }
@@ -70,7 +74,7 @@ public sealed class DatabaseEventPublisher(
     private async Task PublishWithRetryAsync(IReadOnlyList<EventBatchEnvelope> batch, int parallelism,
         int maxAttempts, ConcurrentDictionary<(EventBatchEnvelope Envelope, DateTime Hour), byte> saved,
         ConcurrentDictionary<(EventBatchEnvelope Envelope, DateTime Hour), CompressedEventLogBase> rows,
-        ConcurrentDictionary<EventBatchEnvelope, byte> conflicts,
+        ConcurrentDictionary<(EventBatchEnvelope Envelope, DateTime Hour), byte> conflicts,
         CancellationToken cancellationToken)
     {
         for (var attempt = 1; attempt <= maxAttempts; attempt++)
@@ -82,11 +86,14 @@ public sealed class DatabaseEventPublisher(
             {
                 await ExecuteWorkflowAsync(batch, parallelism, saved, rows, conflicts, timeout.Token);
                 var latency = Stopwatch.GetElapsedTime(started);
-                var archivedCount = batch.Count(envelope => !conflicts.ContainsKey(envelope));
-                if (archivedCount > 0)
+                var conflictedEnvelopes = conflicts.Keys.Select(key => key.Envelope).ToHashSet();
+                var archivedCount = batch.Count(envelope => !conflictedEnvelopes.Contains(envelope));
+                var committed = saved.Keys.Where(key => batch.Contains(key.Envelope) && !conflicts.ContainsKey(key)).ToArray();
+                if (committed.Length > 0)
                 {
                     metrics.RecordPublished(archivedCount, latency);
-                    _log.EnvelopesArchived(archivedCount, latency.TotalMilliseconds);
+                    _log.EnvelopesArchived(archivedCount, committed.Length,
+                        committed.Sum(key => rows[key].Data.LongCount()), latency.TotalMilliseconds);
                 }
                 return;
             }
@@ -113,17 +120,22 @@ public sealed class DatabaseEventPublisher(
     private async Task ExecuteWorkflowAsync(IReadOnlyList<EventBatchEnvelope> batch, int parallelism,
         ConcurrentDictionary<(EventBatchEnvelope Envelope, DateTime Hour), byte> saved,
         ConcurrentDictionary<(EventBatchEnvelope Envelope, DateTime Hour), CompressedEventLogBase> rows,
-        ConcurrentDictionary<EventBatchEnvelope, byte> conflicts,
+        ConcurrentDictionary<(EventBatchEnvelope Envelope, DateTime Hour), byte> conflicts,
         CancellationToken cancellationToken)
     {
         var workflow = new EventBatchEnvelopeWorkflow(scopeFactory, parallelism, cancellationToken,
             options.Value.DatabaseWriteParallelism,
             (envelope, row) => saved.ContainsKey((envelope, row.Start)),
-            (envelope, row) => saved.TryAdd((envelope, row.Start), 0),
+            (envelope, row) =>
+            {
+                var key = (envelope, row.Start);
+                if (saved.TryAdd(key, 0) && !conflicts.ContainsKey(key))
+                    metrics.RecordCommittedRow(row.Data.LongCount());
+            },
             (envelope, row) => rows.GetOrAdd((envelope, row.Start), row),
             (envelope, row, conflict) =>
             {
-                conflicts.TryAdd(envelope, 0);
+                if (!conflicts.TryAdd((envelope, row.Start), 0)) return;
                 var count = row.Data.LongCount();
                 metrics.RecordWriteConflict(count);
                 _log.EventLogWriteConflict(row.DeviceId, row.Start, count, conflict);
@@ -161,6 +173,15 @@ public sealed class DatabaseEventPublisher(
         exception is OperationCanceledException && timeout.IsCancellationRequested && !callerCancellation.IsCancellationRequested
             ? DatabaseFailureKind.Transient
             : DatabaseFailureClassifier.Classify(exception);
+
+    private void ResetCleanDevices(IEnumerable<EventBatchEnvelope> completed,
+        ConcurrentDictionary<(EventBatchEnvelope Envelope, DateTime Hour), byte> conflicts, ISet<int> failedDevices)
+    {
+        var conflictedDevices = conflicts.Keys.Select(key => key.Envelope.DeviceId).ToHashSet();
+        foreach (var deviceId in completed.Select(envelope => envelope.DeviceId).Distinct())
+            if (!conflictedDevices.Contains(deviceId) && !failedDevices.Contains(deviceId))
+                _consecutiveDeviceDrops.TryRemove(deviceId, out _);
+    }
 
     private void DropPoisonBatch(EventBatchEnvelope envelope, Exception exception)
     {

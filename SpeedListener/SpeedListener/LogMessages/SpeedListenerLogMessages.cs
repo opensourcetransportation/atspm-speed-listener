@@ -66,6 +66,14 @@ public partial class SpeedListenerLogMessages(ILogger logger)
         Message = "SpeedListenerLocationTimeZone LocationIdentifier={locationIdentifier} TimeZoneId={timeZoneId} UsesFallback={usesFallback}")]
     public partial void LocationTimeZone(string locationIdentifier, string timeZoneId, bool usesFallback);
 
+    [LoggerMessage(EventId = 3015, EventName = "Location Time Zone Mismatch", Level = LogLevel.Warning,
+        Message = "SpeedListenerTimeZoneMismatch LocationIdentifier={locationIdentifier} ResolvedTimeZoneId={resolvedZone} ExpectedFallbackTimeZoneId={fallbackZone}; verify coordinates and agency zone, difference may be intentional")]
+    public partial void TimeZoneMismatch(string locationIdentifier, string resolvedZone, string fallbackZone);
+
+    [LoggerMessage(EventId = 3016, EventName = "Location Time Zone Mismatch Summary", Level = LogLevel.Warning,
+        Message = "SpeedListenerTimeZoneMismatchSummary Locations={count} DetailLimit={detailLimit} AdditionalLocations={additionalCount}; all location zones are available at Debug")]
+    public partial void TimeZoneMismatchSummary(int count, int detailLimit, int additionalCount);
+
     [LoggerMessage(EventId = 3030, EventName = "Batch Processed", Level = LogLevel.Information,
         Message = "Processed batch of {eventCount} events into {envelopeCount} envelopes")]
     public partial void BatchProcessed(int eventCount, int envelopeCount);

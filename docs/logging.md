@@ -74,6 +74,14 @@ retained in the batch and are not included in routing records.
 
 ## Retention is per sink
 
+Time-zone diagnostics are emitted during mapping refresh, never per packet.
+Event 3013 counts locations using fallback; Debug 3014 identifies all selected
+locations and zones. Warning 3015 identifies up to 20 coordinate-derived zones
+whose rules differ from EventTimeZoneId, and 3016 totals all differences and omitted
+details. These warnings repeat on successful refreshes (normally every five minutes
+under traffic) until coordinates/fallback are corrected, or can remain intentional
+for multi-zone deployments. Valid coordinates still determine stored wall time.
+
 - Optional `ATSPM_STARTUP_LOG` capture supports `ATSPM_STARTUP_LOG_MAX_BYTES`.
   Zero means unlimited append-only capture; a positive byte count sets a cap.
   Malformed, negative or overflowing values emit a diagnostic and fall back to
@@ -111,7 +119,19 @@ all records without sampling or automatic deletion when unlimited retention is s
 
 Set `SPEED_LISTENER_ENV_FILE` to the absolute path of an untracked environment
 file containing your ATSPM `DatabaseConfiguration__...` settings. From the
-repository root, run `docker compose -f deploy/compose.yml up -d --build`.
+repository root, set `SPEED_LISTENER_TIME_ZONE` to the agency IANA zone, then run
+`docker compose -f deploy/compose.yml up -d --build`. For example:
+
+```powershell
+$env:SPEED_LISTENER_ENV_FILE = 'C:\AgencyConfig\listener.env'
+$env:SPEED_LISTENER_TIME_ZONE = 'America/Denver'
+docker compose -f deploy/compose.yml up -d --build
+```
+
+Compose applies this value to both `TZ` and `SpeedListenerConfiguration__EventTimeZoneId`
+and fails before launching if it is missing. Set it in the invoking environment or
+Compose's interpolation `.env`/`--env-file`; the service's `env_file` alone does not
+supply interpolation variables. Coordinates still take precedence for each location.
 The default image is built locally; `SPEED_LISTENER_IMAGE` can select another
 image tag. The default bind address is `127.0.0.1`; set
 `SPEED_LISTENER_BIND_ADDRESS=0.0.0.0` to receive remote sensor traffic, and
@@ -181,7 +201,7 @@ RowsPublished counts confirmed hourly contributions across flushes, not unique
 hourly database rows; EventsPublished counts their occurrences. Fully archived
 envelopes and rows are not interchangeable event-count measures.
 
-Latest application validation, October 15: 214 Release tests passed. Historical
+Latest application validation, October 15: 219 Release tests passed on Windows and Linux. Historical
 volume/Debug flood runs above were not rerun as part of the coordinate-zone change.
 
 

@@ -7,6 +7,8 @@ services:
     env_file:
       - "${SPEED_LISTENER_ENV_FILE:?Set SPEED_LISTENER_ENV_FILE to your database configuration environment file}"
     environment:
+      TZ: "${SPEED_LISTENER_TIME_ZONE:?Set SPEED_LISTENER_TIME_ZONE to the agency IANA zone}"
+      SpeedListenerConfiguration__EventTimeZoneId: "${SPEED_LISTENER_TIME_ZONE:?Set SPEED_LISTENER_TIME_ZONE to the agency IANA zone}"
       SpeedListenerConfiguration__UdpPort: "${SPEED_LISTENER_PORT:-10088}"
     ports:
       - "${SPEED_LISTENER_BIND_ADDRESS:-127.0.0.1}:${SPEED_LISTENER_PORT:-10088}:${SPEED_LISTENER_PORT:-10088}/udp"

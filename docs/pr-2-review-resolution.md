@@ -2,7 +2,7 @@
 
 This is a chronological record of review work. Validation counts below belong
 to their individual revisions; they are not all current test totals. The latest
-recorded result is **214 Release C# tests passed**, with live PostgreSQL/SQLite
+recorded result is **219 Release C# tests passed on Windows and Linux**, with live PostgreSQL/SQLite
 storage checks and model/schema/compression coverage for SQL Server/MySQL/Oracle.
 The current behavior and remaining gates are summarized in
 [the design](speed-listener-design.md) and
@@ -150,7 +150,7 @@ passed 214.
 ## Coordinate-derived location zones
 
 Coordinate lookup now overrides the configured fallback for valid locations,
-matching ATSPM's device-importer approach. The selected location zone is cached
+matching ATSPM's downloader coordinate-lookup approach. The selected location zone is cached
 with device mappings and used both for packet timestamps and effective-date
 cutoffs. Invalid/missing coordinates use EventTimeZoneId (default server local)
 and produce an aggregate refresh warning. All persisted timestamp values and
@@ -167,3 +167,23 @@ those engines without changing application registrations.
 
 Validation: 214 Release C# tests passed; the opt-in PostgreSQL smoke probe also
 passed against a fresh disposable PostgreSQL 16 container.
+
+## Coordinate-zone review follow-up
+
+Reused the toolkit's GetTimeZoneFromCoordinates and removed the direct GeoTimeZone
+reference; it remains a transitive toolkit dependency. Windows IANA identifiers
+are converted with TimeZoneConverter before native TimeZoneInfo lookup, avoiding
+the ICU requirement. All 21 location-zone tests also pass with Windows NLS enabled;
+CI now repeats that check. The complete 219-test suite passes on Windows and Linux.
+
+Warnings identify coordinate-derived zones whose rules differ from EventTimeZoneId,
+with at most 20 location details plus a summary per refresh. Tests verify bounded
+details, matching-zone silence, coordinate precedence and invalid zone input.
+Compose requires SPEED_LISTENER_TIME_ZONE and uses it for both TZ and the fallback.
+Manual Compose validation confirmed both values and rejection when it is missing.
+
+The requested two-hour test was deferred by the user after a short run. In 302.258
+seconds at 334 events/second, all 100,955 sent events were received, parsed and
+verified in decompressed PostgreSQL storage; none were rejected or dropped. Both
+isolated test processes are stopped. This does not close the sustained-capacity gate.
+See [the current short-run results](docker-load-test-results.md#october-15-time-zone-review-short-run).

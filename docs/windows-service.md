@@ -119,6 +119,11 @@ coordinates or an unresolved zone and are using the configured fallback. Debug
 `SpeedListenerLocationTimeZone` identifies those locations individually. Ensure
 coordinates and fallback match the existing database's local-time convention.
 Changing them affects future events and does not repair historical rows.
+`SpeedListenerTimeZoneMismatch` identifies resolved zones whose rules differ from
+the configured fallback. Inspect the listed locations' coordinates; a difference
+can also be intentional. Details are capped at 20 locations per refresh, with a
+summary for additional locations. The Windows package converts IANA identifiers
+to native Windows zones before lookup, so ICU IANA support is not required.
 
 Any secured installation directory is supported; Program Files is not required.
 The service needs read/execute access to runtime/configuration and write access

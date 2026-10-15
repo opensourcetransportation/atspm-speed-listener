@@ -45,7 +45,7 @@ public sealed class DeviceMappingProvider(
 
             using var scope = scopeFactory.CreateScope();
             var context = scope.ServiceProvider.GetRequiredService<ConfigContext>();
-            var fallbackZone = TimeZoneInfo.FindSystemTimeZoneById(options.Value.EventTimeZoneId);
+            var fallbackZone = LocationTimeZoneResolver.ResolveId(options.Value.EventTimeZoneId);
             var instant = timeProvider.GetUtcNow();
             var locations = await context.Locations
                 .AsNoTracking()
@@ -61,6 +61,8 @@ public sealed class DeviceMappingProvider(
             var invalidCount = 0;
             var duplicateCount = 0;
             var fallbackCount = 0;
+            var mismatchCount = 0;
+            const int mismatchDetailLimit = 20;
             // Bound lookup work to unique coordinates in this refresh, not packet volume.
             var zones = new Dictionary<(double Latitude, double Longitude), TimeZoneInfo?>();
 
@@ -91,6 +93,12 @@ public sealed class DeviceMappingProvider(
                 duplicateCount += eligible.Count(candidate => candidate.Location.Start == current.Location.Start) - 1;
                 if (!current.Location.DeviceId.HasValue) continue;
                 if (current.UsesFallback) fallbackCount++;
+                else if (!current.Zone.HasSameRules(fallbackZone))
+                {
+                    mismatchCount++;
+                    if (mismatchCount <= mismatchDetailLimit)
+                        _log.TimeZoneMismatch(identifier, current.Zone.Id, fallbackZone.Id);
+                }
                 updated.Add(identifier, new DeviceMapping(current.Location.DeviceId.Value, identifier, current.Zone));
                 if (logger.IsEnabled(LogLevel.Debug)) _log.LocationTimeZone(identifier, current.Zone.Id, current.UsesFallback);
             }
@@ -106,6 +114,8 @@ public sealed class DeviceMappingProvider(
             metrics.RecordMappingRefresh();
             _log.MappingsLoaded(updated.Count, invalidCount, duplicateCount);
             if (fallbackCount > 0) _log.TimeZoneFallback(fallbackCount, fallbackZone.Id);
+            if (mismatchCount > 0) _log.TimeZoneMismatchSummary(mismatchCount, mismatchDetailLimit,
+                Math.Max(0, mismatchCount - mismatchDetailLimit));
             if (invalidCount > 0 || duplicateCount > 0)
                 _log.MappingValidationWarning(invalidCount, duplicateCount);
         }

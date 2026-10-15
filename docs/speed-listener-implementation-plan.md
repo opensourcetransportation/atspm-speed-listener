@@ -27,10 +27,13 @@ Git history preserves that plan. Current architecture is documented in
 - [x] Model/schema/compression tests for all five relational providers, real SQLite persistence tests and disposable PostgreSQL insert/append probe.
 - [x] Self-contained Windows publishing and offline generator-preview smoke check.
 
-Latest recorded application validation: 214 Release tests passed. Earlier counts
+Latest recorded application validation: 219 Release tests passed on Windows and Linux;
+21 location-zone tests also passed under Windows NLS. Earlier counts
 in [the review history](pr-2-review-resolution.md) describe earlier revisions.
 The [October 9 Docker runs](docker-load-test-results.md) demonstrated short-run
 throughput on that revision; they are not current sustained-capacity evidence.
+The October 15 follow-up reconciled 100,955 events in a five-minute run before the
+user deferred the two-hour test. The sustained gate below remains open.
 
 ## Required before claiming sustained production readiness
 

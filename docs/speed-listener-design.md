@@ -45,8 +45,8 @@ and reject pure IPv6 source mappings during validation. UDP provides no delivery
 acknowledgement, retransmission or cross-datagram reassembly.
 
 Tagged prefixed `Z` + five decimal digits + `XS` packets carry MPH/KPH at bytes
-8/9 and six detector digits at bytes 10–15. Compact `XS` packets carry those
-fields at bytes 2/3 and 4–9. Timestamp suffixes are optional. Messages joined in
+8/9 and six detector digits at bytes 10â€“15. Compact `XS` packets carry those
+fields at bytes 2/3 and 4â€“9. Timestamp suffixes are optional. Messages joined in
 one datagram are separated at `~ CR CR`; a valid frame survives a malformed tail.
 The legacy 16-byte tagged packet without a terminator remains accepted.
 
@@ -88,8 +88,12 @@ all mappings. Cancellation propagates without a refresh-failure warning.
 
 ## Location time zones and timestamps
 
-GeoTimeZone 6.1.0 derives the zone from each location version's latitude/longitude,
-following the device-importer approach in the Gilbert ATSPM checkout. Lookups are
+The ATSPM toolkit's `GetTimeZoneFromCoordinates` derives the zone from each location
+version's latitude/longitude, following the downloader approach in the Gilbert
+ATSPM checkout. GeoTimeZone is a transitive toolkit dependency, not a direct listener
+reference. On Windows, TimeZoneConverter's bundled identifiers map IANA names to
+Windows registry zones before `TimeZoneInfo` lookup, including in NLS mode without
+ICU IANA support. Windows time-zone updates still supply the conversion rules. Lookups are
 cached by coordinate pair within a refresh. ILocationTimeZoneProvider exposes the
 same singleton mapping snapshot to the parser: no database or geographic lookup
 occurs per packet. A refresh updates both devices and zones.
@@ -99,6 +103,12 @@ defaults to the server local zone. An unresolved zone also uses that fallback.
 A valid coordinate-derived zone takes precedence over the configured fallback,
 including an explicit UTC fallback. Warning 3013 reports the fallback count and
 zone once per refresh; Debug 3014 identifies each selected location and its zone.
+Warning 3015 identifies up to 20 locations per refresh whose derived zone rules
+differ from EventTimeZoneId; summary 3016 reports the full count and omitted details.
+The comparison uses rules rather than identifier spelling. Differences can be
+intentional for multi-zone agencies; inspect coordinates before changing them.
+These warnings neither override the resolved zone nor reject events. A wrong but
+valid coordinate in the same zone cannot be detected by this comparison.
 Unknown/unmapped locations use fallback during parsing and are later counted as unknown.
 
 Receipt times and offset-bearing suffixes are instants converted into the location
@@ -211,7 +221,8 @@ budgets must allow graceful drain. [Windows deployment](windows-service.md) and
 
 ## Verification and remaining gates
 
-As of October 15, 2026, 214 Release C# tests passed. Real loopback tests cover
+As of October 15, 2026, 219 Release C# tests passed on Windows and Linux, and all
+21 location-zone tests passed under Windows NLS without ICU IANA lookup. Real loopback tests cover
 IPv4/IPv6, and compressed SQLite tests cover duplicate preservation, append,
 acknowledgement loss and scoped conflicts. Multi-zone tests cover Utah, New York,
 Arizona, DST, joined frames, invalid coordinates and location-version cutoffs.

@@ -168,12 +168,17 @@ required; retry state lasts only for the current publish operation.
 
 Receipt times and explicitly offset sensor timestamps are instants converted
 to the mapped location's time zone, derived from latitude/longitude with
-GeoTimeZone. Zones are cached with the current device mappings; there is no database
+ATSPM toolkit's `GetTimeZoneFromCoordinates`. Zones are cached with the current device mappings; there is no database
 or coordinate lookup per packet. Location effective dates use the same derived
 zone. Missing, invalid or `(0, 0)` coordinates use `EventTimeZoneId`, which defaults
 to the server local zone; a bounded warning reports the fallback count each refresh.
 Debug identifies each mapped location's zone and fallback status. An explicit
 fallback setting does not override a valid coordinate-derived zone.
+Warnings identify coordinate-derived zones whose rules differ from the configured
+fallback, so valid but incorrect coordinates can be investigated. Up to 20 locations
+are identified per refresh, followed by a total; multi-zone agencies may expect these
+differences. On Windows, bundled IANA-to-Windows identifiers avoid requiring ICU
+for zone lookup; native `TimeZoneInfo` still supplies conversion rules.
 
 Offset-less sensor timestamps are interpreted as local time in that location zone.
 Repeated fall-back times select the occurrence closest to packet receipt; all

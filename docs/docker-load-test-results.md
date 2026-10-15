@@ -1,4 +1,40 @@
-# Docker Desktop load test — October 9, 2026
+# Docker Desktop load-test results
+
+## October 15 time-zone review short run
+
+The two-hour test was stopped at the user's request and deferred. This run is
+short-run verification only; the sustained-capacity release gate remains open.
+The current listener/generator used Docker Desktop and PostgreSQL 16, read the
+existing local configuration database, and wrote to a fresh isolated event database.
+No GCP or remote Windows service was involved. Both isolated processes were stopped
+after the listener drained.
+
+| Measurement | Result |
+| --- | --- |
+| Actual wall-clock duration | 302.258 seconds |
+| Achieved rate | 334 events/second, 20,040/minute |
+| Mapped devices/targets touched | 1,233 / 1,233 |
+| Sent / received / parsed / verified stored | 100,955 each |
+| Rejected / dropped / publish failures / conflicts | 0 |
+| Stored device-hour rows | 1,233 |
+| Invalid payload identities, speeds or offset metadata | 0 |
+| Publication timing samples / p95 / maximum | 21 / 650.069 ms / 1,006.439 ms |
+
+Reconciliation decompressed every SpeedEvent row in the otherwise empty test
+event database and counted occurrences without deduplication or timestamp filtering.
+One packet contained one event. Stored timestamps had no offset metadata. The
+timings are per publication operation, not per event or end-to-end latency.
+No full-hour growth cycle, late-hour latency or concentrated-device capacity was
+validated. Generator exit 130 reflects deliberate cancellation; listener exit was 0.
+
+The zone warning identified local test locations 6083 (Africa/Johannesburg), and
+7026, 7027 and 7388 (Antarctica/Troll), against the configured America/Denver
+fallback. Coordinates were not modified. Of the stored events, 100,627 used the
+14:00 local hour and 328 used the 22:00 local hour. This illustrates why valid
+but unexpected coordinates require operator review; the configured fallback does
+not override them. This is a local-test snapshot, not a statement about current GCP data.
+
+## Historical October 9 runs
 
 Historical evidence for revision `9fb15900` of ATSPM and the listener build used
 on October 9. Later mapping, duplicate-preservation, metrics and location-time-zone

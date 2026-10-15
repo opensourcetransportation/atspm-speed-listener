@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using SpeedListener.Configuration;
 using SpeedListener.LoadTesting;
@@ -17,6 +18,56 @@ namespace SpeedListener.Tests;
 
 public sealed class LocationTimeZoneTests
 {
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData(" ")]
+    public void EmptyZoneIsAnActionableArgumentError(string? id) =>
+        Assert.ThrowsAny<ArgumentException>(() => LocationTimeZoneResolver.ResolveId(id!));
+
+    [Fact]
+    public async Task MismatchWarningsAreBoundedAndKeepCoordinateDerivedZones()
+    {
+        await using var services = Services();
+        await Seed(services, Enumerable.Range(1, 25)
+            .Select(id => Device(id, (1000 + id).ToString(), 40.7128, -74.0060)).ToArray());
+        var logger = new CapturingLogger();
+        var clock = new Clock();
+        var provider = new DeviceMappingProvider(services.GetRequiredService<IServiceScopeFactory>(),
+            Options.Create(new SpeedListenerConfiguration { EventTimeZoneId = "America/Denver" }),
+            clock, new SpeedListenerMetrics(clock), logger);
+        var mappings = await provider.GetMappingsAsync(CancellationToken.None);
+        Assert.Equal(25, mappings.Count);
+        Assert.Equal(20, logger.Messages.Count(item => item.Id == 3015));
+        Assert.Contains(logger.Messages, item => item.Id == 3015 && item.Text.Contains("LocationIdentifier=1001"));
+        Assert.Contains(logger.Messages, item => item.Id == 3016 && item.Text.Contains("Locations=25") && item.Text.Contains("AdditionalLocations=5"));
+        Assert.Equal(14, TimeZoneInfo.ConvertTime(new DateTimeOffset(2026, 7, 15, 18, 0, 0, TimeSpan.Zero),
+            mappings["1001"].TimeZone!).Hour);
+    }
+
+    [Fact]
+    public async Task MatchingZoneDoesNotWarn()
+    {
+        await using var services = Services();
+        await Seed(services, Device(1, "5026", 40.7608, -111.8910));
+        var logger = new CapturingLogger();
+        var clock = new Clock();
+        var provider = new DeviceMappingProvider(services.GetRequiredService<IServiceScopeFactory>(),
+            Options.Create(new SpeedListenerConfiguration { EventTimeZoneId = "America/Denver" }),
+            clock, new SpeedListenerMetrics(clock), logger);
+        await provider.GetMappingsAsync(CancellationToken.None);
+        Assert.DoesNotContain(logger.Messages, item => item.Id is 3015 or 3016);
+    }
+
+    private sealed class CapturingLogger : ILogger<DeviceMappingProvider>
+    {
+        public List<(int Id, string Text)> Messages { get; } = new();
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel level) => level >= LogLevel.Warning;
+        public void Log<TState>(LogLevel level, EventId id, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter) => Messages.Add((id.Id, formatter(state, exception)));
+    }
+
     [Theory]
     [InlineData(40.7128, -74.0060, 7, 14)]
     [InlineData(40.7128, -74.0060, 1, 13)]
@@ -98,7 +149,7 @@ public sealed class LocationTimeZoneTests
         var config = new SpeedListenerConfiguration { EventTimeZoneId = "America/Denver" };
         var provider = Provider(services, config);
         var map = await provider.GetMappingsAsync(CancellationToken.None);
-        Assert.Equal("America/Denver", map["5026"].TimeZone!.Id);
+        Assert.True(map["5026"].TimeZone!.HasSameRules(TimeZoneInfo.FindSystemTimeZoneById(OperatingSystem.IsWindows() ? "Mountain Standard Time" : "America/Denver")));
         var frame = SpeedTestPacket.Create("502620", 30, SpeedTestPacketFormat.Compact, null);
         var parsed = new SpeedPacketParser(Options.Create(config), provider).Parse(new UdpDatagram(frame,
             new IPEndPoint(IPAddress.Loopback, 1), new DateTimeOffset(2026, 7, 15, 18, 0, 0, TimeSpan.Zero)));
@@ -121,8 +172,8 @@ public sealed class LocationTimeZoneTests
         Assert.Equal(2, mappings["5026"].DeviceId); // 08:00 New York.
         Assert.Equal(3, mappings["5271"].DeviceId); // 06:00 Utah.
         await services.DisposeAsync();
-        Assert.Equal("America/New_York", provider.GetTimeZone("5026")!.Id);
-        Assert.Equal("America/Denver", provider.GetTimeZone("5271")!.Id);
+        Assert.Equal(OperatingSystem.IsWindows() ? "Eastern Standard Time" : "America/New_York", provider.GetTimeZone("5026")!.Id);
+        Assert.Equal(OperatingSystem.IsWindows() ? "Mountain Standard Time" : "America/Denver", provider.GetTimeZone("5271")!.Id);
         Assert.Null(provider.GetTimeZone("9999"));
     }
 
@@ -136,7 +187,7 @@ public sealed class LocationTimeZoneTests
             Options.Create(new SpeedListenerConfiguration()), clock, new SpeedListenerMetrics(clock),
             NullLogger<DeviceMappingProvider>.Instance);
         await provider.GetMappingsAsync(CancellationToken.None);
-        Assert.Equal("America/Denver", provider.GetTimeZone("5026")!.Id);
+        Assert.Equal(OperatingSystem.IsWindows() ? "Mountain Standard Time" : "America/Denver", provider.GetTimeZone("5026")!.Id);
         await using (var scope = services.CreateAsyncScope())
         {
             var context = scope.ServiceProvider.GetRequiredService<ConfigContext>();
@@ -147,7 +198,7 @@ public sealed class LocationTimeZoneTests
         }
         clock.Advance(TimeSpan.FromMinutes(6));
         await provider.RefreshAsync(CancellationToken.None);
-        Assert.Equal("America/New_York", provider.GetTimeZone("5026")!.Id);
+        Assert.Equal(OperatingSystem.IsWindows() ? "Eastern Standard Time" : "America/New_York", provider.GetTimeZone("5026")!.Id);
     }
 
     [Fact]

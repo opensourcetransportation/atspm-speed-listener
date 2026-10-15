@@ -7,6 +7,18 @@ on:
     branches: [ "main" ]
 
 jobs:
+  windows-nls-time-zones:
+    runs-on: windows-latest
+    env:
+      DOTNET_SYSTEM_GLOBALIZATION_USENLS: '1'
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: 9.0.x
+    - name: Test location zones without ICU IANA lookup
+      run: dotnet test SpeedListener/SpeedListener.Tests/SpeedListener.Tests.csproj -c Release --filter FullyQualifiedName~LocationTimeZoneTests
+
   deployment-scripts:
     runs-on: windows-latest
     strategy:

@@ -3,8 +3,18 @@
 The Windows x64 package is self-contained: no separate .NET installation is needed.
 Use Windows Server 2019, 2022, or 2025 x64. It includes native Windows service
 lifetime support and reads appsettings.json from the executable directory.
+These installation/upgrade examples assume a **complete multi-file publish folder**
+with SpeedListener.exe, SpeedListener.dll, dependency/runtime manifests and the
+maintained scripts under deploy/. The service test packages supplied with this
+branch have that layout. The current release-assets workflow instead produces
+single-file runtime archives; those are not interchangeable with the complete
+folder required by Upgrade-Service.ps1. If building from source, publish with
+`-p:PublishSingleFile=false` and use deployment scripts from this repository.
 
-Configure appsettings.json for your deployment before installation. Supply database
+Configure appsettings.json for your deployment before installation. Use strict
+JSON without comments for Windows PowerShell 5.1 deployment scripts, which read
+it through ConvertFrom-Json; remove any commented-out sample sections. The .NET
+host accepts comments, but that does not make them portable across script hosts. Supply database
 connection settings through your approved secrets process. The packaged ATSPM
 library validates all four database contexts; configure each required context and
 disable migrations for a listener-only deployment. Repository defaults do not
@@ -36,7 +46,7 @@ Log on as a service right through your organization's account policy. Upgrades a
 diagnostics preserve the registered identity. Paths, sample
 addresses and service names in examples are placeholders to replace for your agency.
 
-## 1. Extract and check connectivity
+## Extract and check connectivity
 
 Open PowerShell **as Administrator** on the test server. Adjust the ZIP path:
 
@@ -57,7 +67,7 @@ Use only the server's specific IP, not a broad public range. A VPN/private route
 Cloud SQL Auth Proxy is an alternative, but requires changing the configured host.
 Existing TLS connection options are preserved from the secrets.
 
-## 2. Register and start the service
+## Register and start the service
 
 Replace the example sensor subnet with the actual sensor IP addresses or CIDR
 ranges. The installer restricts file access, registers the event source, creates
@@ -66,7 +76,7 @@ the service under the selected account, and opens the configured UDP port only f
 ```powershell
 # Configure SpeedListenerConfiguration.UdpPort for your agency before installation.
 $installPath = 'C:\Services\ATSPM-SpeedListener-win-x64'
-.\Install-Service.ps1 -InstallPath $installPath -SensorRemoteAddress '192.0.2.0/24'
+.\deploy\Install-Service.ps1 -InstallPath $installPath -SensorRemoteAddress '192.0.2.0/24'
 Start-Service AtspmSpeedListener
 Start-Sleep -Seconds 10
 Get-Service AtspmSpeedListener
@@ -84,12 +94,39 @@ must also allow that traffic. A running service alone is not proof of readiness:
 look for loaded device mappings and the listener-started message, then increasing
 received/published counters in the minute summaries. The configuration database
 must contain a current location version whose identifier matches the first four
-characters of the packet detector ID. Its lowest-ID SpeedSensor device is used;
+ASCII digits of the packet detector ID. Its lowest-ID **Active** SpeedSensor is used;
 DeviceIdentifier does not need to match the packet. Missing location/device mappings
-are dropped. Avoid two listeners writing the same sensor stream to
+are skipped and counted in `UnknownSinceLast`/unknown-detector warnings. A parsed
+packet is not proof of an eligible device mapping. Avoid two listeners writing the same sensor stream to
 these databases, and remember test packets become real event-log records.
 
-## 3. Cloud Logging (optional)
+## Mapping and time-zone checks
+
+A missing mapping can mean no eligible location version, an identifier other than
+four numeric digits, or no Active SpeedSensor on the selected version. Unknown,
+Inactive, Decommissioned, Testing and Staging statuses do not participate. If the
+current version lacks an active sensor, a historical device is not substituted.
+A deleted version is excluded before selection, allowing the prior non-deleted
+version to become current. LoggingEnabled alone does not make a device eligible.
+
+Configuration changes are picked up on the next demand-driven cache refresh,
+default five minutes, while batches are being processed. A restart reloads immediately.
+Expect the affected unknown warnings to stop; their counts cover the last summary
+period only. Loaded-map count and `EventsPublished` provide supporting evidence.
+
+Warning `SpeedListenerTimeZoneFallback` means selected locations have unusable
+coordinates or an unresolved zone and are using the configured fallback. Debug
+`SpeedListenerLocationTimeZone` identifies those locations individually. Ensure
+coordinates and fallback match the existing database's local-time convention.
+Changing them affects future events and does not repair historical rows.
+
+Any secured installation directory is supported; Program Files is not required.
+The service needs read/execute access to runtime/configuration and write access
+to an enabled diagnostic capture file. The installer and diagnostics helper
+provision their documented permissions. To allow every sensor source in the local
+firewall rule, use `-SensorRemoteAddress 'Any'`; this does not change upstream rules.
+
+## Cloud Logging (optional)
 
 Database access uses your configured database credentials. Set
 `Logging.Google.Enabled` to `false` if Cloud Logging is not configured.
@@ -116,8 +153,10 @@ Warning and Error have no per-packet payload output; the summary and aggregate
 loss warning count every rejection. Successful packets do not produce per-packet
 logs. `Truncated=True` identifies a payload longer than the 64-byte preview.
 `XS` speed messages with six numeric detector digits are supported, with or without
-the six-byte sensor prefix. Other headers, including the observed `X1` messages,
-are rejected rather than interpreted as speeds.
+the six-byte sensor prefix. Valid `X1` actuation messages (including the documented multi-drop prefix) are
+classified as actuation and are not speed events. Basic untagged XS messages need
+an exact endpoint mapping; otherwise they increment `UnmappedSpeed`. Malformed X1
+and unsupported binary `Z4`/track-file `XT` messages remain rejected.
 
 For console output from a Windows service, run as Administrator:
 
@@ -180,7 +219,8 @@ Publishing uses eight concurrent database writers by default. Writes for a given
 device remain serialized to preserve the repository's read/merge/write behavior.
 `SpeedListenerConfiguration.DatabaseWriteParallelism` controls this limit; reduce
 it if the database cannot support the concurrent load. The write deadline still
-applies to a complete batch, and success is logged as `Archived ... envelopes`.
+applies to a complete archive/save attempt, and success reports archived
+device-hour contributions, event count and fully archived envelope count.
 
 ```powershell
 Stop-Service AtspmSpeedListener
@@ -189,7 +229,8 @@ Start-Service AtspmSpeedListener
 Restart-Service AtspmSpeedListener
 ```
 
-Allow roughly 50 seconds for the configured shutdown drain; forced termination can
+With the default settings, allow the 45-second drain plus the host's five-second
+shutdown margin; forced termination can
 lose queued events. UDP and the in-memory queue provide no durable delivery guarantee.
 
 If startup fails, check the Atspm and Application event logs. For direct console
@@ -205,8 +246,10 @@ Extract a complete new Windows x64 publish package outside the installation fold
 then run the reusable script as Administrator:
 
 ```powershell
-.\deploy\Upgrade-Service.ps1 -SourcePath 'C:\Temp\ATSPM-SpeedListener-new' `
-    -InstallPath 'C:\Services\ATSPM-SpeedListener-win-x64'
+$source = 'C:\Temp\ATSPM-SpeedListener-new'
+& (Join-Path $source 'deploy\Upgrade-Service.ps1') -SourcePath $source `
+    -InstallPath 'C:\Services\ATSPM-SpeedListener-win-x64' `
+    -ServiceName 'AtspmSpeedListener' -TimeoutSeconds 90
 ```
 
 The script validates that the registered executable belongs to the installation,

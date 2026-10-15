@@ -14,14 +14,16 @@ category to Information and dependency categories to Warning. Provider-specific
 overrides still apply. Windows Event Log defaults to Warning; use
 `Logging.EventLog.LogLevel.SpeedListener=Information` if summaries are wanted there.
 
-## Volume review
+## Historical volume review (October 9, 2026)
 
 The October 9 Docker test's 155,876 events produced a 30,303-byte text capture,
 including startup/model warnings and summaries every ten seconds. Individual
 summary records averaged 350 bytes; completed-batch and archive records each
 averaged about 117 bytes. At 20,000 events/minute, batch size 5,000 and the normal
 one-minute summary, this projects to roughly 1.9 MiB/day per text sink, including
-the test configuration's recurring mapping warning. JSON envelopes, timestamps,
+the test configuration's recurring mapping warning. These byte measurements
+predate the expanded row/event/conflict counters and location-zone messages;
+remeasure current output for a retention budget. JSON envelopes, timestamps,
 cloud metadata and exceptions add overhead. This is an estimate, not a retention
 guarantee. Small configured batches or frequent summaries increase volume.
 
@@ -65,7 +67,7 @@ sampling. Detector aggregation resets each period and does not retain IDs for
 the lifetime of the process. There is no five-minute per-detector warning cache.
 
 For example, search startup capture for `SpeedListenerUnknownDetector` and
-`SpeedListenerMappedDetector`, then filter `LocationIdentifier=5026` or `5271`.
+`SpeedListenerMappedDetector`, then filter the desired `LocationIdentifier`.
 No records for those locations means none were processed during that capture;
 it does not prove the configuration is missing. Packet source addresses are not
 retained in the batch and are not included in routing records.
@@ -80,7 +82,8 @@ retained in the batch and are not included in routing records.
   `-MaxFileSizeMB` for a chosen cap (for example, 1024 for 1 GiB). A manually set
   capture path without a size setting defaults to 10 MiB. With a positive limit,
   older contents are cleared when full, including oversized files at startup.
-  No extra directory permissions are required. Disable temporary capture after use.
+  The service account must be able to write the capture file; the diagnostics
+  helper grants that access. Disable temporary capture after use.
 - Docker's default `json-file` driver can be unbounded. The generic
   [deployment compose file](../deploy/compose.yml) explicitly sets `max-size=10m`
   and `max-file=3` by default, retaining approximately 30 MB per listener container.
@@ -125,9 +128,9 @@ The override uses Compose's `!reset` tag to remove normal rotation options;
 use a Compose version that supports this tag. Return to the base file alone
 and recreate the container to restore normal Information logging and retention.
 
-## Verification
+## Historical verification (October 9, 2026)
 
-All 99 application tests passed, including Unicode diagnostic output, oversized
+At that revision, all 99 application tests passed, including Unicode diagnostic output, oversized
 existing captures, oversized single writes and structured rejection fields.
 A 1,000-message rejection test emits all 1,000 records at Debug and zero payload
 records at Information, Warning or Error, while counting every rejection at every
@@ -153,6 +156,43 @@ the same logical row twice. A device's poison history resets only after a clean
 publish; a conflict, even alongside a committed hour, cannot clear that history.
 
 The summary now names its interval counter `UnknownSinceLast`, replacing the
-previous mixed-semantics `Unknown` field. Other summary counters remain cumulative
-unless their names explicitly say otherwise. Per-detector warning EventCount is
+previous mixed-semantics `Unknown` field. Other event/publication/failure counters remain cumulative since process start.
+ChannelDepth is current queue depth, MappingAgeSeconds is age since successful
+refresh, and PublishLatencyMs is a lifetime mean rather than a counter. Per-detector warning EventCount is
 also per period; see the warning description above.
+
+
+## Location zones and latency
+
+Warning 3013 (`SpeedListenerTimeZoneFallback`) reports how many selected locations
+use the configured fallback because coordinates/lookup are unusable. It appears
+at most once per successful mapping refresh, not per packet. Debug 3014
+(`SpeedListenerLocationTimeZone`) identifies each mapped location's zone and
+fallback flag. Active-device/current-version selection determines which locations
+appear; a missing detector mapping should also prompt a DeviceStatus check.
+
+PublishLatencyMs averages recorded completed publication-attempt durations since
+startup. It includes that attempt's archive/save work but excludes earlier failed
+attempts and retry delays. It is not latency per event, queue residence time,
+end-to-end storage delay or a percentile. Recent `Archived ... device-hour rows`
+records show individual completed-attempt timings. Queue growth, drops, retries,
+failures and conflicts provide context for judging whether the writer keeps up.
+RowsPublished counts confirmed hourly contributions across flushes, not unique
+hourly database rows; EventsPublished counts their occurrences. Fully archived
+envelopes and rows are not interchangeable event-count measures.
+
+Latest application validation, October 15: 214 Release tests passed. Historical
+volume/Debug flood runs above were not rerun as part of the coordinate-zone change.
+
+
+The mapping-validation message's `duplicate rows` means location versions tied
+at the selected effective date. It is not a count of identical speed detections.
+Invalid rows indicate unroutable location identifiers. Those configuration counts
+are separate from Rejected, UnknownSinceLast and write-conflict metrics.
+
+For a healthy observation window, compare Received/Parsed and EventsPublished
+deltas after allowing partial batches to flush. Lifetime Parsed and EventsPublished
+can differ because earlier unknown/poison/conflicted events were skipped, or
+because a partial batch is still in flight; ChannelDepth=0 alone does not prove
+all accepted events have committed. Fixing a mapping stops future skips but does
+not recover previously skipped events or reset lifetime counters.

@@ -30,11 +30,12 @@ target reports its location, device ID, and synthetic detector ID.
 One synthetic detector is formed as the four numeric location digits plus a
 two-digit channel (`01` by default, changed with `--channel`). It is not necessary
 to look up a device's name or IP address: the listener routes by detector prefix.
-The selected speed device is the lowest-ID SpeedSensor on the current location
-version, exactly as in production ingestion. If multiple speed devices exist on
+The selected speed device is the lowest-ID Active SpeedSensor on the current location
+version, exactly as in production ingestion. If multiple active speed devices exist on
 the same current version, their packets cannot target distinct devices with this
-mapping; `ExtraDevicesAtSameLocation` reports the additional devices. Nonnumeric
-location prefixes are reported separately. No historical device is substituted.
+mapping; `ExtraDevicesAtSameLocation` reports the additional active devices.
+Unroutable location identifiers are excluded and counted in mapping validation;
+only four numeric digits can form a generator target. No historical device is substituted.
 
 ## Send events for every discovered device
 
@@ -75,8 +76,8 @@ visit every target, the command reports that before sending.
 `--format prefixed` (default) sends `Z00000XS` frames; `--format compact` sends
 `XS` frames. Each event has a six-digit numeric detector ID and the `~ CR CR`
 terminator. The default synthetic UTC timestamp suffix makes timestamps distinct
-at the requested schedule and avoids accidental value-equality collapse during
-fast tests. The listener converts those instants into each mapped location's coordinate-derived
+at the requested schedule and makes persisted-count/time-window verification
+easier; equal occurrences are valid and the listener preserves them. The listener converts those instants into each mapped location's coordinate-derived
 zone, using `EventTimeZoneId` only as fallback.
 
 Use `--no-timestamps` to exercise the normal sensor format with listener receipt
@@ -113,9 +114,12 @@ Touched means the sender attempted a successful UDP send for that target; it doe
 not acknowledge receipt or persistence. A send error stops the test and returns
 exit code 1; Ctrl+C returns 130.
 
-Compare counter changes on the listener, especially `Received`, `Parsed`,
-`Rejected`, `UnknownSinceLast`, `Dropped`, `ChannelDepth`, `PublishFailures` and archived
-envelopes. One generator event is one datagram; multiple events share each hourly
+Compare lifetime-counter deltas for `Received`, `Parsed`, `Rejected`, `Dropped`,
+`RowsPublished`, `EventsPublished`, `PublishFailures` and conflicts. Sum
+`UnknownSinceLast` across every summary in the run; it resets each period and is
+not a lifetime counter. `ChannelDepth` is a gauge. `PublishLatencyMs` is a lifetime
+mean of recorded completed publication-attempt work, not end-to-end event latency
+or a late-hour percentile. Use individual archive timings for recent latency. One generator event is one datagram; multiple events share each hourly
 envelope, so envelope counts should not equal event counts. Allow the listener's
 configured flush interval to elapse and its queue to drain before comparing stored
 event totals. Use an otherwise isolated stream or capture starting counters so
@@ -134,7 +138,7 @@ to include two complete hourly growth cycles. Verify location coordinates and ex
 EventTimeZoneId fallback for both discovery and the receiving listener.
 
 ```powershell
-.\SpeedListener.exe generate --host <test-listener-host> --port <test-port> `
+.\SpeedListener.exe generate --host '<test-listener-host>' --port 12000 `
     --rate 334 --duration 7200 --format compact
 ```
 

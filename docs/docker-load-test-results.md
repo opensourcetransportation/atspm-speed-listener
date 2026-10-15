@@ -1,5 +1,11 @@
 # Docker Desktop load test — October 9, 2026
 
+Historical evidence for revision `9fb15900` of ATSPM and the listener build used
+on October 9. Later mapping, duplicate-preservation, metrics and location-time-zone
+changes are not covered by these runs. This is not the required two-hour sustained
+capacity test; see [current status](speed-listener-implementation-plan.md) and
+[load-test requirements](load-testing.md#sustained-capacity-release-gate).
+
 ATSPM was built from `avenueconsultants/udot-atspm-development` main revision
 `9fb15900ecea85fde27b792a9f42087eb87121e3`. The configuration, data, report and
 identity APIs, web UI and database installer were built from that source.

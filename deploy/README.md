@@ -26,12 +26,17 @@ Get-Help .\deploy\Install-Service.ps1 -Full
 Get-Help .\deploy\Test-ServiceSwitchover.ps1 -Examples
 ```
 
-Use these source scripts when preparing deployment packages. The ignored `build/`
+Use these source scripts when preparing deployment packages. Upgrade-Service.ps1
+requires a complete multi-file publish (including DLL and dependency/runtime
+manifests). The current GitHub release-assets workflow creates single-file runtime
+archives and does not copy these scripts; prepare the full service layout separately
+or use the complete test-server package. Do not assume every release ZIP has the
+same deployment layout. The ignored `build/`
 directory may contain historical troubleshooting scripts or previously generated
 packages; it is not a maintained script source. Do not redistribute those old
 scripts as current deployment tools.
 
-The scripts under `tests/` use temporary fixtures and mocked system commands. They
+The scripts under `deploy/tests/` use temporary fixtures and mocked system commands. They
 do not control real services or change firewall rules. CI runs them under both
 PowerShell 7 and Windows PowerShell 5.1.
 

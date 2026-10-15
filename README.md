@@ -68,11 +68,11 @@ format, for example `SpeedListenerConfiguration__UdpPort=10088`.
 | `ShutdownFlushTimeout` | `00:00:45` | Shared drain deadline; must allow one publish's attempts plus retry delays; a full backlog may not drain |
 | `ShutdownMaxWriteAttempts` | `1` | Attempts per publish while draining |
 | `DeviceMappingRefreshInterval` | `00:05:00` | ATSPM device-cache refresh interval |
-| `ArchiveParallelism` | `50` | Parallelism for envelope compression |
+| `ArchiveParallelism` | `50` | Parallelism for transforming envelopes into hourly rows; EF compresses payloads during saving |
 | `DatabaseWriteParallelism` | `8` | Concurrent writers for different devices; writes to the same device remain serialized |
 | `WriteTimeout` | `00:00:30` | Database write-attempt timeout |
 | `MaxWriteAttempts` | `3` | Attempts for transient database failures |
-| `PoisonDeviceFailureThreshold` | `3` | Consecutive data-attributable drops before failing one device scope |
+| `PoisonDeviceFailureThreshold` | `3` | Consecutive data-attributable drops for one device before failing the listener |
 | `SummaryInterval` | `00:01:00` | Structured summary and loss-warning interval |
 
 ATSPM `DatabaseConfiguration` settings configure the configuration and event-log
@@ -147,12 +147,13 @@ and repeated references. Retry recognition remains a separate write operation.
 Parsed events are mapped to ATSPM
 `SpeedSensor` devices, grouped by device, converted into hourly compressed event
 logs, and upserted through cancellable EF operations using the packaged ATSPM
-context, models, primary keys and compression. The local writer preserves every received event because the packaged generic Data accessors and
+context, models, primary keys and compression. The local writer preserves every occurrence delivered to a successful write because the packaged generic Data accessors and
 repository Union would otherwise remove equal events. The writer uses the base
 payload accessor and cancellable EF operations. Successfully acknowledged hourly rows are skipped on retry;
 uncertain in-process commits are checked against fixed-size fingerprints of the
 persisted event fields. LocationIdentifier is row metadata, not part of an event
-fingerprint. No full hourly payload copies are retained in the retry plan. Distinct events with identical values are preserved, including within
+fingerprint. The retry plan retains fingerprints rather than full-hour snapshots; merging and
+compression still materialize hourly payloads. Distinct events with identical values are preserved, including within
 one batch and across separate batches. A retry reuses the same logical row and
 recognizes its intended prefix after a commit, including subsequent appends by
 another writer. An unresolvable outside change logs a device-hour conflict and
@@ -180,6 +181,17 @@ occurrences are retained. Nonexistent spring-forward times require an explicit
 offset. All stored event timestamps and hourly keys use `DateTimeKind.Unspecified`,
 including UTC locations/fallbacks: wall-clock digits are stored without time-zone
 metadata. Changing coordinates or the fallback does not migrate existing records.
+
+The existing ATSPM date-range speed/controller report repositories preserve stored
+occurrences through the base payload accessor. Direct typed compressed-row Data
+access still uses a HashSet. Standard ATSPM archive/import/update paths may remove
+occurrences before storage; this listener's write path bypasses that deduplication.
+
+[Database-provider validation](docs/speed-listener-design.md#verification-and-remaining-gates)
+covers model/schema/compression contracts for PostgreSQL, SQL Server, MySQL,
+Oracle and SQLite. Live insert/append checks have passed for PostgreSQL and SQLite;
+SQL Server/MySQL/Oracle live-engine checks remain outstanding. The opt-in
+`tests/DatabaseProviderSmoke` probe requires an empty disposable database.
 
 The in-memory channel is bounded. When it is full, the newest event is dropped
 and counted in rate-limited summary logs. UDP itself is not reliable, and this release has no durable spool, so

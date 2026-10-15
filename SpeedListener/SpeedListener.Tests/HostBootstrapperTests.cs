@@ -168,7 +168,7 @@ public sealed class HostBootstrapperTests
             """{ "SpeedListenerConfiguration": { "UdpPort": 10089 } }"""));
         var configuration = new ConfigurationBuilder().AddJsonStream(stream).Build();
         var options = configuration.GetSection("SpeedListenerConfiguration").Get<SpeedListenerConfiguration>()!;
-        Assert.Equal(TimeZoneInfo.Local.Id, options.EventTimeZoneId);
+        Assert.Equal("Local", options.EventTimeZoneId);
     }
 
     [Fact]

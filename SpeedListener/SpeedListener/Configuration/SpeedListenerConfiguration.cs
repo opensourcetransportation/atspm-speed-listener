@@ -13,8 +13,8 @@ public sealed class SpeedListenerConfiguration
 {
     /// <summary>Gets or sets the UDP bind port.</summary>
     public int UdpPort { get; set; } = 10088;
-    /// <summary>Gets or sets the fallback zone for missing location coordinates; defaults to the server local zone.</summary>
-    public string EventTimeZoneId { get; set; } = TimeZoneInfo.Local.Id;
+    /// <summary>Gets or sets the event zone. Local uses the server zone; coordinates are never used.</summary>
+    public string EventTimeZoneId { get; set; } = "Local";
     /// <summary>Maps exact source IP:port endpoints to six-digit detector IDs for untagged XS messages.</summary>
     public List<UntaggedSpeedDetectorMapping> UntaggedSpeedDetectorMappings { get; set; } = new();
     /// <summary>Gets or sets the maximum number of queued events.</summary>

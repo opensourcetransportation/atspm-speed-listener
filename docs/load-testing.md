@@ -77,8 +77,8 @@ visit every target, the command reports that before sending.
 `XS` frames. Each event has a six-digit numeric detector ID and the `~ CR CR`
 terminator. The default synthetic UTC timestamp suffix makes timestamps distinct
 at the requested schedule and makes persisted-count/time-window verification
-easier; equal occurrences are valid and the listener preserves them. The listener converts those instants into each mapped location's coordinate-derived
-zone, using `EventTimeZoneId` only as fallback.
+easier; equal occurrences are valid and the listener preserves them. The listener converts those instants into server local time by default
+(`EventTimeZoneId=Local`), or the explicitly configured uniform override.
 
 Use `--no-timestamps` to exercise the normal sensor format with listener receipt
 times. The listener preserves otherwise equal occurrences; the standard ATSPM archive
@@ -134,8 +134,8 @@ hour's row growth. Run at least 7,200 seconds at the expected peak aggregate rat
 against isolated local test databases. For the UDOT target, 334 events/second is
 20,040/minute and yields approximately 2,404,800 events over two hours. Do not set
 an earlier count limit. Start around an hour boundary, or run longer than two hours
-to include two complete hourly growth cycles. Verify location coordinates and explicitly configure the agency
-EventTimeZoneId fallback for both discovery and the receiving listener.
+to include two complete hourly growth cycles. Verify the server/container local zone and use EventTimeZoneId=Local for both
+discovery and the receiving listener. An explicit override must match both processes.
 
 ```powershell
 .\SpeedListener.exe generate --host '<test-listener-host>' --port 12000 `

@@ -88,36 +88,26 @@ all mappings. Cancellation propagates without a refresh-failure warning.
 
 ## Location time zones and timestamps
 
-The ATSPM toolkit's `GetTimeZoneFromCoordinates` derives the zone from each location
-version's latitude/longitude, following the downloader approach in the Gilbert
-ATSPM checkout. GeoTimeZone is a transitive toolkit dependency, not a direct listener
-reference. On Windows, TimeZoneConverter's bundled identifiers map IANA names to
-Windows registry zones before `TimeZoneInfo` lookup, including in NLS mode without
-ICU IANA support. Windows time-zone updates still supply the conversion rules. Lookups are
-cached by coordinate pair within a refresh. ILocationTimeZoneProvider exposes the
-same singleton mapping snapshot to the parser: no database or geographic lookup
-occurs per packet. A refresh updates both devices and zones.
+The listener uses the server local time zone by default. Set
+`SpeedListenerConfiguration.EventTimeZoneId` to `"Local"` (the shipped default).
+Coordinates are not consulted and cannot shift events or location-version cutoffs.
+An explicit zone such as `UTC` or `America/Denver` remains an override for all locations;
+upgrades preserve installed settings, so change an existing override to `"Local"`
+when adopting server time. Existing records are not converted or repaired.
+In Docker, server local time means the container's zone: set
+`SPEED_LISTENER_TIME_ZONE` to configure `TZ`. The Compose file explicitly selects
+`EventTimeZoneId=Local`. Check the Windows server's zone with `Get-TimeZone`.
 
-Missing/nonfinite/out-of-range coordinates or `(0, 0)` use EventTimeZoneId, which
-defaults to the server local zone. An unresolved zone also uses that fallback.
-A valid coordinate-derived zone takes precedence over the configured fallback,
-including an explicit UTC fallback. Warning 3013 reports the fallback count and
-zone once per refresh; Debug 3014 identifies each selected location and its zone.
-Warning 3015 identifies up to 20 locations per refresh whose derived zone rules
-differ from EventTimeZoneId; summary 3016 reports the full count and omitted details.
-The comparison uses rules rather than identifier spelling. Differences can be
-intentional for multi-zone agencies; inspect coordinates before changing them.
-These warnings neither override the resolved zone nor reject events. A wrong but
-valid coordinate in the same zone cannot be detected by this comparison.
-Unknown/unmapped locations use fallback during parsing and are later counted as unknown.
+Receipt times and offset-bearing sensor timestamps are converted into this zone.
+Offset-less sensor timestamps are interpreted in the same zone. Stored event
+timestamps and hourly keys use `DateTimeKind.Unspecified`, with no zone or offset
+metadata. DST ambiguity selects the occurrence closest to receipt; nonexistent
+spring-forward wall times require an offset. Duplicate occurrences remain separate.
 
-Receipt times and offset-bearing suffixes are instants converted into the location
-zone. Offset-less suffixes are interpreted as wall time in that zone. Ambiguous
-fall-back times select the instant closest to receipt and retain their wall-clock
-digits; equal occurrences remain separate events. Nonexistent spring-forward
-times require an explicit offset. Every stored event timestamp and hourly key has
-DateTimeKind.Unspecified, including UTC locations. No zone/offset is persisted.
-Changing coordinates or fallback does not migrate earlier records.
+TimeZoneConverter.GetTimeZoneInfo handles explicit Windows/IANA identifiers.
+Local uses TimeZoneInfo.Local directly. Coordinate lookup and mismatch/fallback
+warnings have been removed. The existing ILocationTimeZoneProvider snapshot exposes
+the same configured zone for every mapped location; no geographic lookup occurs.
 
 ## Batching, archive and persistence
 
@@ -221,11 +211,10 @@ budgets must allow graceful drain. [Windows deployment](windows-service.md) and
 
 ## Verification and remaining gates
 
-As of October 15, 2026, 219 Release C# tests passed on Windows and Linux, and all
-21 location-zone tests passed under Windows NLS without ICU IANA lookup. Real loopback tests cover
+As of October 15, 2026, the server-time revision passes 210 Release C# tests on Windows and Linux. Real loopback tests cover
 IPv4/IPv6, and compressed SQLite tests cover duplicate preservation, append,
 acknowledgement loss and scoped conflicts. Multi-zone tests cover Utah, New York,
-Arizona, DST, joined frames, invalid coordinates and location-version cutoffs.
+DST, joined frames, ignored bad coordinates and server-local location-version cutoffs.
 Windows script tests mock service/firewall operations; CI is configured to run
 them under PowerShell 7 and Windows PowerShell 5.1, plus Linux .NET build/tests.
 Local success does not assert the current remote CI run is green.

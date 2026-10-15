@@ -74,13 +74,11 @@ retained in the batch and are not included in routing records.
 
 ## Retention is per sink
 
-Time-zone diagnostics are emitted during mapping refresh, never per packet.
-Event 3013 counts locations using fallback; Debug 3014 identifies all selected
-locations and zones. Warning 3015 identifies up to 20 coordinate-derived zones
-whose rules differ from EventTimeZoneId, and 3016 totals all differences and omitted
-details. These warnings repeat on successful refreshes (normally every five minutes
-under traffic) until coordinates/fallback are corrected, or can remain intentional
-for multi-zone deployments. Valid coordinates still determine stored wall time.
+Debug 3014 identifies each mapped location's selected zone. All locations use
+server local time by default, or the explicitly configured uniform override.
+Coordinate fallback/mismatch warnings 3013, 3015 and 3016 are no longer emitted.
+Information 3017 (`SpeedListenerEventTimeZone`) reports the configured and resolved
+zone once on the first successful mapping load, including the actual zone for Local.
 
 - Optional `ATSPM_STARTUP_LOG` capture supports `ATSPM_STARTUP_LOG_MAX_BYTES`.
   Zero means unlimited append-only capture; a positive byte count sets a cap.
@@ -128,10 +126,10 @@ $env:SPEED_LISTENER_TIME_ZONE = 'America/Denver'
 docker compose -f deploy/compose.yml up -d --build
 ```
 
-Compose applies this value to both `TZ` and `SpeedListenerConfiguration__EventTimeZoneId`
+Compose applies this value to `TZ`, selects `SpeedListenerConfiguration__EventTimeZoneId=Local`,
 and fails before launching if it is missing. Set it in the invoking environment or
 Compose's interpolation `.env`/`--env-file`; the service's `env_file` alone does not
-supply interpolation variables. Coordinates still take precedence for each location.
+supply interpolation variables. Coordinates are ignored.
 The default image is built locally; `SPEED_LISTENER_IMAGE` can select another
 image tag. The default bind address is `127.0.0.1`; set
 `SPEED_LISTENER_BIND_ADDRESS=0.0.0.0` to receive remote sensor traffic, and
@@ -184,12 +182,10 @@ also per period; see the warning description above.
 
 ## Location zones and latency
 
-Warning 3013 (`SpeedListenerTimeZoneFallback`) reports how many selected locations
-use the configured fallback because coordinates/lookup are unusable. It appears
-at most once per successful mapping refresh, not per packet. Debug 3014
-(`SpeedListenerLocationTimeZone`) identifies each mapped location's zone and
-fallback flag. Active-device/current-version selection determines which locations
-appear; a missing detector mapping should also prompt a DeviceStatus check.
+Debug 3014 (`SpeedListenerLocationTimeZone`) identifies each mapped location's
+selected zone. With EventTimeZoneId=Local it is the server/container local zone.
+Coordinate-based warnings have been removed. Active-device/current-version selection
+determines which locations appear; missing mappings should prompt a DeviceStatus check.
 
 PublishLatencyMs averages recorded completed publication-attempt durations since
 startup. It includes that attempt's archive/save work but excludes earlier failed
@@ -201,7 +197,7 @@ RowsPublished counts confirmed hourly contributions across flushes, not unique
 hourly database rows; EventsPublished counts their occurrences. Fully archived
 envelopes and rows are not interchangeable event-count measures.
 
-Latest application validation, October 15: 219 Release tests passed on Windows and Linux. Historical
+Latest server-time application validation, October 15: 210 Release tests passed on Windows and Linux. Historical
 volume/Debug flood runs above were not rerun as part of the coordinate-zone change.
 
 

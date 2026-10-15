@@ -13,7 +13,7 @@ Git history preserves that plan. Current architecture is documented in
 - [x] Documented X1 actuation classification and explicit endpoint mappings for basic untagged XS. Z4 and XT remain unsupported.
 - [x] Current-version mapping that excludes deleted versions before selection, selects the lowest-ID Active speed device, and reports invalid/tied identifiers.
 - [x] Four-digit numeric location routing documented as a deployment prerequisite; full detector IDs retained for reports.
-- [x] Coordinate-derived location zones, cached mapping snapshots, fallback warnings and per-location effective-date comparisons.
+- [x] Server-local timestamps and effective-date comparisons; optional uniform zone override; coordinates ignored.
 - [x] Unspecified wall-clock storage for events/hour keys, offset and offset-less suffix handling, DST coverage and Npgsql compatibility.
 - [x] Bounded channel, size/age flushes, unknown-event summaries and backpressure/drop accounting.
 - [x] Typed local hourly archive step with ATSPM attribution and duplicate preservation.
@@ -27,8 +27,7 @@ Git history preserves that plan. Current architecture is documented in
 - [x] Model/schema/compression tests for all five relational providers, real SQLite persistence tests and disposable PostgreSQL insert/append probe.
 - [x] Self-contained Windows publishing and offline generator-preview smoke check.
 
-Latest recorded application validation: 219 Release tests passed on Windows and Linux;
-21 location-zone tests also passed under Windows NLS. Earlier counts
+Latest recorded application validation: 210 Release tests passed on Windows and Linux; 12 server-zone tests also passed in Windows NLS mode. Earlier counts
 in [the review history](pr-2-review-resolution.md) describe earlier revisions.
 The [October 9 Docker runs](docker-load-test-results.md) demonstrated short-run
 throughput on that revision; they are not current sustained-capacity evidence.

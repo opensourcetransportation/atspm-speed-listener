@@ -2,7 +2,7 @@
 
 This is a chronological record of review work. Validation counts below belong
 to their individual revisions; they are not all current test totals. The latest
-recorded result is **219 Release C# tests passed on Windows and Linux**, with live PostgreSQL/SQLite
+recorded server-time result is **210 Release C# tests passed on Windows and Linux**, with live PostgreSQL/SQLite
 storage checks and model/schema/compression coverage for SQL Server/MySQL/Oracle.
 The current behavior and remaining gates are summarized in
 [the design](speed-listener-design.md) and
@@ -20,7 +20,7 @@ subsequent live provider probes used disposable local test storage.
 | Duplicate count stays zero | Confirmed. Rows tied at the current effective date now increment the duplicate counter. Historical versions are expected and are not counted as duplicate mappings. The highest location ID wins ties. |
 | Refresh cancellation logs failure | Confirmed. Caller cancellation propagates without a warning or refresh-failure increment. |
 | Shutdown validation assumes one batch | The budget was never a guarantee that an entire bounded queue could drain. Validation now includes capped retry delays for one publish, documents that minimum, and every batch started during shutdown receives the shutdown attempt limit. The shared cancellation token bounds the backlog, including EF writes. |
-| UTC differs from local ATSPM time | Superseded by coordinate-derived zones: valid coordinates determine each location's zone; EventTimeZoneId is fallback only and defaults to server local. All stored values use Unspecified Kind, including UTC. Seasonal conversion tests cover receipt and sensor suffix timestamps. |
+| UTC differs from local ATSPM time | Superseded by the server-time policy: EventTimeZoneId=Local uses the server zone for every location and effective-date cutoff; coordinates are ignored. All stored values use Unspecified Kind, including UTC. Seasonal conversion tests cover receipt and sensor suffix timestamps. |
 | Upgrade uses only appsettings port | Confirmed. A running service's actual UDP binding determines readiness, including environment, mounted configuration and command-line overrides. `-ExpectedPort` provides an explicit choice. Ambiguous bindings are rejected before stopping the service. |
 | JToken event round trip | Confirmed. Envelopes now retain typed `IReadOnlyList<SpeedEvent>` collections and archive directly into typed hourly lists, removing JSON conversion and reflection from that stage. |
 
@@ -187,3 +187,16 @@ seconds at 334 events/second, all 100,955 sent events were received, parsed and
 verified in decompressed PostgreSQL storage; none were rejected or dropped. Both
 isolated test processes are stopped. This does not close the sustained-capacity gate.
 See [the current short-run results](docker-load-test-results.md#october-15-time-zone-review-short-run).
+
+
+## Server-time policy supersedes coordinate zones
+
+At the user's request, coordinates no longer determine timestamps or location-version
+cutoffs. EventTimeZoneId defaults to Local, resolved directly to TimeZoneInfo.Local.
+Named overrides remain uniform across all locations; installed overrides are preserved
+and must be changed to Local to use server time. The draft coordinate opt-in was not
+shipped. Coordinate lookup and fallback/mismatch warnings were removed. Docker TZ
+remains explicit and the listener uses Local. All timestamps/hour keys remain naive.
+Historical rows were not rewritten. Bad-coordinate, default-server-zone, explicit-override
+and version-boundary tests pass; the complete Windows and Linux suites have 210 tests; 12 server-zone tests also pass under Windows NLS.
+The two-hour test remains deferred; no new load test was run for this policy change.

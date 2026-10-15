@@ -60,7 +60,7 @@ format, for example `SpeedListenerConfiguration__UdpPort=10088`.
 | Setting | Default | Description |
 | --- | ---: | --- |
 | `UdpPort` | `10088` | UDP bind port |
-| `EventTimeZoneId` | Server local time zone | Fallback for unusable coordinates; valid location coordinates determine the event zone |
+| `EventTimeZoneId` | `Local` | Server local zone; explicit zone names override it for every location; coordinates are ignored |
 | `UntaggedSpeedDetectorMappings` | `[]` | Explicit source IP:port to six-digit detector mapping for basic XS messages |
 | `ChannelCapacity` | `100000` | Maximum queued parsed events |
 | `BatchSize` | `5000` | Size-triggered flush threshold |
@@ -94,7 +94,7 @@ for sink limits and Docker configuration.
 Routing uses the first four characters of the packet detector identifier as the
 location identifier (for example, `502620` routes to `5026`). The current location
 version has the latest non-deleted `Start` at or before the refresh time in
-the location's coordinate-derived time zone (or `EventTimeZoneId` fallback). Equal dates use the highest location ID and count the remaining
+the server local time zone (or explicit `EventTimeZoneId` override). Equal dates use the highest location ID and count the remaining
 tied rows as duplicates. Its lowest-ID active SpeedSensor device is selected.
 Older versions are not used when the current non-deleted version lacks an active
 SpeedSensor. All channels at that location share the selected device; full detector
@@ -166,26 +166,21 @@ fully archived envelopes. A conflict or poison failure prevents that device's
 poison-drop history from being reset, including during isolated retries. No database schema change is
 required; retry state lasts only for the current publish operation.
 
-Receipt times and explicitly offset sensor timestamps are instants converted
-to the mapped location's time zone, derived from latitude/longitude with
-ATSPM toolkit's `GetTimeZoneFromCoordinates`. Zones are cached with the current device mappings; there is no database
-or coordinate lookup per packet. Location effective dates use the same derived
-zone. Missing, invalid or `(0, 0)` coordinates use `EventTimeZoneId`, which defaults
-to the server local zone; a bounded warning reports the fallback count each refresh.
-Debug identifies each mapped location's zone and fallback status. An explicit
-fallback setting does not override a valid coordinate-derived zone.
-Warnings identify coordinate-derived zones whose rules differ from the configured
-fallback, so valid but incorrect coordinates can be investigated. Up to 20 locations
-are identified per refresh, followed by a total; multi-zone agencies may expect these
-differences. On Windows, bundled IANA-to-Windows identifiers avoid requiring ICU
-for zone lookup; native `TimeZoneInfo` still supplies conversion rules.
+The listener uses the server local time zone by default. Set
+`SpeedListenerConfiguration.EventTimeZoneId` to `"Local"` (the shipped default).
+Coordinates are not consulted and cannot shift events or location-version cutoffs.
+An explicit zone such as `UTC` or `America/Denver` remains an override for all locations;
+upgrades preserve installed settings, so change an existing override to `"Local"`
+when adopting server time. Existing records are not converted or repaired.
+In Docker, server local time means the container's zone: set
+`SPEED_LISTENER_TIME_ZONE` to configure `TZ`. The Compose file explicitly selects
+`EventTimeZoneId=Local`. Check the Windows server's zone with `Get-TimeZone`.
 
-Offset-less sensor timestamps are interpreted as local time in that location zone.
-Repeated fall-back times select the occurrence closest to packet receipt; all
-occurrences are retained. Nonexistent spring-forward times require an explicit
-offset. All stored event timestamps and hourly keys use `DateTimeKind.Unspecified`,
-including UTC locations/fallbacks: wall-clock digits are stored without time-zone
-metadata. Changing coordinates or the fallback does not migrate existing records.
+Receipt times and offset-bearing sensor timestamps are converted into this zone.
+Offset-less sensor timestamps are interpreted in the same zone. Stored event
+timestamps and hourly keys use `DateTimeKind.Unspecified`, with no zone or offset
+metadata. DST ambiguity selects the occurrence closest to receipt; nonexistent
+spring-forward wall times require an offset. Duplicate occurrences remain separate.
 
 The existing ATSPM date-range speed/controller report repositories preserve stored
 occurrences through the base payload accessor. Direct typed compressed-row Data

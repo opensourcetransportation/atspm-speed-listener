@@ -20,15 +20,21 @@ library validates all four database contexts; configure each required context an
 disable migrations for a listener-only deployment. Repository defaults do not
 contain deployment credentials.
 
-The listener derives each mapped location's zone from its latitude/longitude.
-`SpeedListenerConfiguration.EventTimeZoneId` is the fallback only when coordinates
-are missing, invalid or `(0, 0)`; it defaults to the Windows server local zone.
-Set that fallback explicitly to the agency zone when deploying outside that zone
-or in containers. Valid coordinates take precedence even if an older configuration
-sets UTC. Each mapping refresh reports the number of locations using fallback.
-All event timestamps and hourly keys are stored as local wall time without time-zone
-metadata. Verify coordinates and fallback before cutover; this does not convert
-existing records.
+The listener uses the server local time zone by default. Set
+`SpeedListenerConfiguration.EventTimeZoneId` to `"Local"` (the shipped default).
+Coordinates are not consulted and cannot shift events or location-version cutoffs.
+An explicit zone such as `UTC` or `America/Denver` remains an override for all locations;
+upgrades preserve installed settings, so change an existing override to `"Local"`
+when adopting server time. Existing records are not converted or repaired.
+In Docker, server local time means the container's zone: set
+`SPEED_LISTENER_TIME_ZONE` to configure `TZ`. The Compose file explicitly selects
+`EventTimeZoneId=Local`. Check the Windows server's zone with `Get-TimeZone`.
+
+Receipt times and offset-bearing sensor timestamps are converted into this zone.
+Offset-less sensor timestamps are interpreted in the same zone. Stored event
+timestamps and hourly keys use `DateTimeKind.Unspecified`, with no zone or offset
+metadata. DST ambiguity selects the occurrence closest to receipt; nonexistent
+spring-forward wall times require an offset. Duplicate occurrences remain separate.
 
 If you include credentials in a deployment ZIP, restrict access to both the ZIP
 and installed directory. Keep credential-bearing packages out of source control.
@@ -114,16 +120,11 @@ default five minutes, while batches are being processed. A restart reloads immed
 Expect the affected unknown warnings to stop; their counts cover the last summary
 period only. Loaded-map count and `EventsPublished` provide supporting evidence.
 
-Warning `SpeedListenerTimeZoneFallback` means selected locations have unusable
-coordinates or an unresolved zone and are using the configured fallback. Debug
-`SpeedListenerLocationTimeZone` identifies those locations individually. Ensure
-coordinates and fallback match the existing database's local-time convention.
-Changing them affects future events and does not repair historical rows.
-`SpeedListenerTimeZoneMismatch` identifies resolved zones whose rules differ from
-the configured fallback. Inspect the listed locations' coordinates; a difference
-can also be intentional. Details are capped at 20 locations per refresh, with a
-summary for additional locations. The Windows package converts IANA identifiers
-to native Windows zones before lookup, so ICU IANA support is not required.
+Earlier coordinate-zone fallback and mismatch warnings are no longer emitted.
+Debug `SpeedListenerLocationTimeZone` identifies the zone selected for mapped locations.
+Startup Information `SpeedListenerEventTimeZone` reports both the configured setting
+and resolved zone, so `Local` can be verified without enabling Debug.
+Use `EventTimeZoneId="Local"` for server time and verify `Get-TimeZone` before cutover.
 
 Any secured installation directory is supported; Program Files is not required.
 The service needs read/execute access to runtime/configuration and write access

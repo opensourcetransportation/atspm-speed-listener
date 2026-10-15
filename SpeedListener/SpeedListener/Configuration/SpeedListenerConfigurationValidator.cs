@@ -16,7 +16,7 @@ public sealed class SpeedListenerConfigurationValidator : IValidateOptions<Speed
         }
         try { SpeedListener.Services.LocationTimeZoneResolver.ResolveId(options.EventTimeZoneId); }
         catch (Exception ex) when (ex is TimeZoneNotFoundException or InvalidTimeZoneException or ArgumentException)
-        { Require(false, nameof(options.EventTimeZoneId), "must identify an installed time zone matching the agency database."); }
+        { Require(false, nameof(options.EventTimeZoneId), "must be Local for server time or an installed time zone matching the agency database."); }
         Require(options.UdpPort is > 0 and <= 65535, nameof(options.UdpPort), "must be between 1 and 65535.");
         Require(options.ChannelCapacity > 0, nameof(options.ChannelCapacity), "must be positive.");
         Require(options.BatchSize > 0 && options.BatchSize <= options.ChannelCapacity, nameof(options.BatchSize), "must be positive and no larger than ChannelCapacity.");

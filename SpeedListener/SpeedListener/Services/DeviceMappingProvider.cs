@@ -52,7 +52,7 @@ public sealed class DeviceMappingProvider(
                 .Where(location => location.VersionAction != LocationVersionActions.Delete)
                 .Select(location => new
                 {
-                    location.Id, location.LocationIdentifier, location.Start, location.Latitude, location.Longitude,
+                    location.Id, location.LocationIdentifier, location.Start,
                     DeviceId = location.Devices.Where(device => device.DeviceType == DeviceTypes.SpeedSensor && device.DeviceStatus == DeviceStatus.Active)
                         .OrderBy(device => device.Id).Select(device => (int?)device.Id).FirstOrDefault()
                 })
@@ -60,11 +60,7 @@ public sealed class DeviceMappingProvider(
             var updated = new Dictionary<string, DeviceMapping>(StringComparer.OrdinalIgnoreCase);
             var invalidCount = 0;
             var duplicateCount = 0;
-            var fallbackCount = 0;
-            var mismatchCount = 0;
-            const int mismatchDetailLimit = 20;
-            // Bound lookup work to unique coordinates in this refresh, not packet volume.
-            var zones = new Dictionary<(double Latitude, double Longitude), TimeZoneInfo?>();
+            var wallClock = TimeZoneInfo.ConvertTime(instant, fallbackZone).DateTime;
 
             foreach (var versions in locations.GroupBy(location => location.LocationIdentifier?.Trim() ?? string.Empty,
                          StringComparer.OrdinalIgnoreCase))
@@ -76,31 +72,14 @@ public sealed class DeviceMappingProvider(
                     invalidCount++;
                     continue;
                 }
-                var eligible = versions.Select(location =>
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    var coordinates = (location.Latitude, location.Longitude);
-                    if (!zones.TryGetValue(coordinates, out var resolved))
-                        zones[coordinates] = resolved = LocationTimeZoneResolver.Resolve(coordinates.Latitude, coordinates.Longitude);
-                    var zone = resolved ?? fallbackZone;
-                    // Effective dates are location-local timestamp-without-zone values.
-                    var wallClock = TimeZoneInfo.ConvertTime(instant, zone).DateTime;
-                    return (Location: location, Zone: zone, UsesFallback: resolved is null, WallClock: wallClock);
-                }).Where(candidate => candidate.Location.Start <= candidate.WallClock).ToArray();
+                var eligible = versions.Where(location => location.Start <= wallClock).ToArray();
                 if (eligible.Length == 0) continue;
-                var current = eligible.OrderByDescending(candidate => candidate.Location.Start)
-                    .ThenByDescending(candidate => candidate.Location.Id).First();
-                duplicateCount += eligible.Count(candidate => candidate.Location.Start == current.Location.Start) - 1;
-                if (!current.Location.DeviceId.HasValue) continue;
-                if (current.UsesFallback) fallbackCount++;
-                else if (!current.Zone.HasSameRules(fallbackZone))
-                {
-                    mismatchCount++;
-                    if (mismatchCount <= mismatchDetailLimit)
-                        _log.TimeZoneMismatch(identifier, current.Zone.Id, fallbackZone.Id);
-                }
-                updated.Add(identifier, new DeviceMapping(current.Location.DeviceId.Value, identifier, current.Zone));
-                if (logger.IsEnabled(LogLevel.Debug)) _log.LocationTimeZone(identifier, current.Zone.Id, current.UsesFallback);
+                var current = eligible.OrderByDescending(location => location.Start)
+                    .ThenByDescending(location => location.Id).First();
+                duplicateCount += eligible.Count(location => location.Start == current.Start) - 1;
+                if (!current.DeviceId.HasValue) continue;
+                updated.Add(identifier, new DeviceMapping(current.DeviceId.Value, identifier, fallbackZone));
+                if (logger.IsEnabled(LogLevel.Debug)) _log.LocationTimeZone(identifier, fallbackZone.Id, false);
             }
 
             // Fail an unconfigured startup, but a successful refresh may legitimately
@@ -109,13 +88,11 @@ public sealed class DeviceMappingProvider(
                 throw new InvalidOperationException(
                     $"No valid speed-sensor mappings were found ({invalidCount} invalid, {duplicateCount} duplicate rows).");
 
+            if (_mappings is null) _log.EventTimeZone(options.Value.EventTimeZoneId, fallbackZone.Id);
             Volatile.Write(ref _mappings, updated);
             _loadedAt = timeProvider.GetUtcNow();
             metrics.RecordMappingRefresh();
             _log.MappingsLoaded(updated.Count, invalidCount, duplicateCount);
-            if (fallbackCount > 0) _log.TimeZoneFallback(fallbackCount, fallbackZone.Id);
-            if (mismatchCount > 0) _log.TimeZoneMismatchSummary(mismatchCount, mismatchDetailLimit,
-                Math.Max(0, mismatchCount - mismatchDetailLimit));
             if (invalidCount > 0 || duplicateCount > 0)
                 _log.MappingValidationWarning(invalidCount, duplicateCount);
         }

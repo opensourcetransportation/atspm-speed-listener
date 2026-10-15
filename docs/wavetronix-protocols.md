@@ -49,8 +49,8 @@ The mapped detector goes through the same current-location-version lookup as
 normal tagged events: the first four digits identify the location and its
 lowest-ID Active SpeedSensor on the current eligible non-deleted version receives
 the event. Four numeric location digits are required. Receipt time is converted
-to the location's coordinate-derived zone; EventTimeZoneId is fallback only when
-coordinates are unusable. Stored times have Unspecified Kind with no offset. Configured endpoint mappings never override tagged detector identifiers
+to the server local zone by default (`EventTimeZoneId=Local`); explicit zone names
+apply uniformly and coordinates are ignored. Stored times have Unspecified Kind with no offset. Configured endpoint mappings never override tagged detector identifiers
 and never convert actuation or unsupported binary data into speed events.
 
 Without a mapping, a recognized basic speed message increments `UnmappedSpeed`,

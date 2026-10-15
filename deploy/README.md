@@ -5,8 +5,8 @@ For containers, `compose.yml` builds the listener and defaults Docker logs to
 [logging and Docker configuration](../docs/logging.md).
 Add `compose.debug.yml` for explicit Debug logging without log rotation.
 Set `SPEED_LISTENER_TIME_ZONE` to the agency's IANA zone in the environment invoking
-Compose (for example `America/Denver`). It is required and sets both container `TZ`
-and the listener's `EventTimeZoneId` fallback. Location coordinates take precedence.
+Compose (for example `America/Denver`). It is required and sets container `TZ`
+for container local time. The listener uses `EventTimeZoneId=Local`; coordinates are ignored.
 
 These are the maintained scripts for any agency deployment. They do not select a
 GCP project, database host, sensor IP, production port, or existing legacy service.

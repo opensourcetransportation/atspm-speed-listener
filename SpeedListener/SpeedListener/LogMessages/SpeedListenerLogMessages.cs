@@ -58,21 +58,13 @@ public partial class SpeedListenerLogMessages(ILogger logger)
         Message = "Device mapping refresh failed; continuing with the last successful mapping")]
     public partial void MappingRefreshFailed(Exception exception);
 
-    [LoggerMessage(EventId = 3013, EventName = "Location Time Zone Fallback", Level = LogLevel.Warning,
-        Message = "SpeedListenerTimeZoneFallback Locations={count} FallbackTimeZoneId={timeZoneId}; missing or unusable coordinates require the fallback zone")]
-    public partial void TimeZoneFallback(int count, string timeZoneId);
-
     [LoggerMessage(EventId = 3014, EventName = "Location Time Zone", Level = LogLevel.Debug,
         Message = "SpeedListenerLocationTimeZone LocationIdentifier={locationIdentifier} TimeZoneId={timeZoneId} UsesFallback={usesFallback}")]
     public partial void LocationTimeZone(string locationIdentifier, string timeZoneId, bool usesFallback);
 
-    [LoggerMessage(EventId = 3015, EventName = "Location Time Zone Mismatch", Level = LogLevel.Warning,
-        Message = "SpeedListenerTimeZoneMismatch LocationIdentifier={locationIdentifier} ResolvedTimeZoneId={resolvedZone} ExpectedFallbackTimeZoneId={fallbackZone}; verify coordinates and agency zone, difference may be intentional")]
-    public partial void TimeZoneMismatch(string locationIdentifier, string resolvedZone, string fallbackZone);
-
-    [LoggerMessage(EventId = 3016, EventName = "Location Time Zone Mismatch Summary", Level = LogLevel.Warning,
-        Message = "SpeedListenerTimeZoneMismatchSummary Locations={count} DetailLimit={detailLimit} AdditionalLocations={additionalCount}; all location zones are available at Debug")]
-    public partial void TimeZoneMismatchSummary(int count, int detailLimit, int additionalCount);
+    [LoggerMessage(EventId = 3017, EventName = "Event Time Zone", Level = LogLevel.Information,
+        Message = "SpeedListenerEventTimeZone ConfiguredTimeZoneId={configuredTimeZoneId} ResolvedTimeZoneId={resolvedTimeZoneId}; coordinates are ignored")]
+    public partial void EventTimeZone(string configuredTimeZoneId, string resolvedTimeZoneId);
 
     [LoggerMessage(EventId = 3030, EventName = "Batch Processed", Level = LogLevel.Information,
         Message = "Processed batch of {eventCount} events into {envelopeCount} envelopes")]

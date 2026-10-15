@@ -4,7 +4,7 @@
 
 The two-hour test was stopped at the user's request and deferred. This run is
 short-run verification only; the sustained-capacity release gate remains open.
-The current listener/generator used Docker Desktop and PostgreSQL 16, read the
+The coordinate-derived build at 56920e8 used Docker Desktop and PostgreSQL 16, read the
 existing local configuration database, and wrote to a fresh isolated event database.
 No GCP or remote Windows service was involved. Both isolated processes were stopped
 after the listener drained.
@@ -31,8 +31,8 @@ The zone warning identified local test locations 6083 (Africa/Johannesburg), and
 7026, 7027 and 7388 (Antarctica/Troll), against the configured America/Denver
 fallback. Coordinates were not modified. Of the stored events, 100,627 used the
 14:00 local hour and 328 used the 22:00 local hour. This illustrates why valid
-but unexpected coordinates require operator review; the configured fallback does
-not override them. This is a local-test snapshot, not a statement about current GCP data.
+but unexpected coordinates require operator review; that revision did not override them. The subsequent server-time policy ignores
+coordinates and does not repair these isolated historical rows. This is a local-test snapshot, not a statement about current GCP data.
 
 ## Historical October 9 runs
 

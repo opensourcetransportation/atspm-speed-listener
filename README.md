@@ -60,7 +60,7 @@ format, for example `SpeedListenerConfiguration__UdpPort=10088`.
 | Setting | Default | Description |
 | --- | ---: | --- |
 | `UdpPort` | `10088` | UDP bind port |
-| `EventTimeZoneId` | `UTC` | Time zone for stored events; set to the agency database's convention, for example `America/Denver` |
+| `EventTimeZoneId` | Server local time zone | Time zone for stored events; set to the agency database's convention, for example `America/Denver` |
 | `UntaggedSpeedDetectorMappings` | `[]` | Explicit source IP:port to six-digit detector mapping for basic XS messages |
 | `ChannelCapacity` | `100000` | Maximum queued parsed events |
 | `BatchSize` | `5000` | Size-triggered flush threshold |
@@ -93,13 +93,22 @@ for sink limits and Docker configuration.
 
 Routing uses the first four characters of the packet detector identifier as the
 location identifier (for example, `502620` routes to `5026`). The current location
-version has the latest `Start` at or before the refresh time in `EventTimeZoneId`. A current
-deletion suppresses the mapping; older versions are not resurrected. Equal dates
-use the highest location ID and count the remaining tied rows as duplicates. Its lowest-ID SpeedSensor
-device is selected. Older versions are not used when the current version lacks a
+version has the latest non-deleted `Start` at or before the refresh time in
+`EventTimeZoneId`. Equal dates use the highest location ID and count the remaining
+tied rows as duplicates. Its lowest-ID active SpeedSensor device is selected.
+Older versions are not used when the current non-deleted version lacks an active
 SpeedSensor. All channels at that location share the selected device; full detector
 identifiers remain in the stored events. DeviceIdentifier and sensor IP are not
 used for this lookup.
+
+Deployment prerequisite: this protocol routes a six-digit detector ID as exactly
+four ASCII location digits followed by two channel digits. ATSPM supports location
+identifiers up to ten characters, but other lengths and nonnumeric identifiers
+are not addressable by this routing scheme. They are reported as invalid mappings;
+they are never truncated into potentially conflicting locations. The latest
+non-deleted version effective at the agency wall clock is selected, then its
+lowest-ID active SpeedSensor. Deleting a version allows the previous eligible
+version to become current, matching ATSPM; an inactive device never wins selection.
 
 The service reads the legacy packet layout used by the ATSPM Speed Listener pull
 request: MPH at byte 8, KPH at byte 9, a six-byte ASCII detector identifier at
@@ -160,7 +169,7 @@ Receipt times and explicitly offset sensor timestamps are instants converted
 to `EventTimeZoneId` for storage. Offset-less sensor timestamps are interpreted
 as wall-clock time in that zone. Repeated fall-back times use the occurrence
 closest to packet receipt; the wall-clock timestamp and all events are retained.
-Nonexistent spring-forward times still require an explicit offset. UTC remains the default. For an agency database
+Nonexistent spring-forward times still require an explicit offset. The server local time zone is the default. For an agency database
 that stores local wall-clock times, configure its zone before ingesting data;
 non-UTC storage uses `DateTimeKind.Unspecified`. Match the existing database's
 convention, including its treatment of repeated hours when daylight saving ends.

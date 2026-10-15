@@ -20,7 +20,7 @@ public sealed class DatabaseSpeedTargetProvider(IDeviceMappingProvider mappings,
             .Where(device => selectedIds.Contains(device.Id))
             .Select(device => device.Location.Id).Distinct().ToListAsync(cancellationToken);
         var devices = await context.Devices.AsNoTracking()
-            .Where(device => device.DeviceType == DeviceTypes.SpeedSensor && currentLocationIds.Contains(device.Location.Id))
+            .Where(device => device.DeviceType == DeviceTypes.SpeedSensor && device.DeviceStatus == DeviceStatus.Active && currentLocationIds.Contains(device.Location.Id))
             .Select(device => device.Id).ToListAsync(cancellationToken);
         var extraDevices = devices.Count(id => !selected.ContainsKey(id));
         var targets = map.Values.Where(mapping => mapping.LocationIdentifier.Length == 4 &&

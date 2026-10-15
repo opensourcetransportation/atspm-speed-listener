@@ -40,7 +40,7 @@ public sealed class DeviceMappingProviderTests
     }
 
     [Fact]
-    public async Task GetMappingsAsync_DeletionIsLatestVersion_DoesNotResurrectOldDevice()
+    public async Task GetMappingsAsync_DeletedNewestVersion_FallsBackToLatestNonDeletedVersion()
     {
         await using var services = CreateServices();
         var old = Device(1, "old", DeviceTypes.SpeedSensor, "5026");
@@ -50,7 +50,7 @@ public sealed class DeviceMappingProviderTests
         deleted.Location.VersionAction = LocationVersionActions.Delete;
         await SeedAsync(services, old, deleted, Device(3, "other", DeviceTypes.SpeedSensor, "5271"));
         var mappings = await CreateProvider(services).GetMappingsAsync(CancellationToken.None);
-        Assert.False(mappings.ContainsKey("5026"));
+        Assert.Equal(1, mappings["5026"].DeviceId);
         Assert.True(mappings.ContainsKey("5271"));
     }
 
@@ -65,10 +65,12 @@ public sealed class DeviceMappingProviderTests
         var metrics = new SpeedListenerMetrics(clock);
         var provider = CreateProvider(services, metrics, clock);
         Assert.Single(await provider.GetMappingsAsync(CancellationToken.None));
-        var deleted = Device(2, "deleted", DeviceTypes.SpeedSensor, "5026");
-        deleted.Location.Start = new DateTime(2025, 1, 1);
-        deleted.Location.VersionAction = LocationVersionActions.Delete;
-        await SeedAsync(services, deleted);
+        await using (var scope = services.CreateAsyncScope())
+        {
+            var context = scope.ServiceProvider.GetRequiredService<ConfigContext>();
+            (await context.Locations.SingleAsync()).VersionAction = LocationVersionActions.Delete;
+            await context.SaveChangesAsync();
+        }
         clock.Advance(TimeSpan.FromMinutes(6));
         Assert.Empty(await provider.GetMappingsAsync(CancellationToken.None));
         Assert.Equal(0, metrics.MappingRefreshFailures);
@@ -171,6 +173,50 @@ public sealed class DeviceMappingProviderTests
         Assert.Equal(2, metrics.MappingRefreshFailures);
     }
 
+    [Theory]
+    [InlineData(DeviceStatus.Unknown)]
+    [InlineData(DeviceStatus.Decommissioned)]
+    [InlineData(DeviceStatus.Inactive)]
+    [InlineData(DeviceStatus.Testing)]
+    [InlineData(DeviceStatus.Staging)]
+    public async Task GetMappingsAsync_SkipsNonActiveSpeedDevices(DeviceStatus status)
+    {
+        await using var services = CreateServices();
+        var inactive = Device(1, "old-sensor", DeviceTypes.SpeedSensor, "5026");
+        inactive.DeviceStatus = status;
+        var active = Device(2, "replacement", DeviceTypes.SpeedSensor, "5026");
+        active.Location = inactive.Location;
+        await SeedAsync(services, inactive, active);
+        Assert.Equal(2, (await CreateProvider(services).GetMappingsAsync(CancellationToken.None))["5026"].DeviceId);
+    }
+
+    [Fact]
+    public async Task GetMappingsAsync_CurrentVersionWithoutActiveSensor_DoesNotUseHistoricalDevice()
+    {
+        await using var services = CreateServices();
+        var old = Device(1, "old", DeviceTypes.SpeedSensor, "5026");
+        old.Location.Start = new DateTime(2020, 1, 1);
+        var current = Device(2, "inactive", DeviceTypes.SpeedSensor, "5026");
+        current.Location.Start = new DateTime(2025, 1, 1);
+        current.DeviceStatus = DeviceStatus.Inactive;
+        await SeedAsync(services, old, current, Device(3, "other", DeviceTypes.SpeedSensor, "5271"));
+        Assert.False((await CreateProvider(services).GetMappingsAsync(CancellationToken.None)).ContainsKey("5026"));
+    }
+
+    [Theory]
+    [InlineData("502")]
+    [InlineData("50260")]
+    [InlineData("1234567890")]
+    [InlineData("ABCD")]
+    public async Task GetMappingsAsync_ReportsUnroutableIdentifiers(string identifier)
+    {
+        await using var services = CreateServices();
+        await SeedAsync(services, Device(1, "invalid", DeviceTypes.SpeedSensor, identifier));
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            CreateProvider(services).GetMappingsAsync(CancellationToken.None));
+        Assert.Contains("1 invalid", error.Message);
+    }
+
     private static ServiceProvider CreateServices()
     {
         var services = new ServiceCollection();
@@ -226,6 +272,7 @@ public sealed class DeviceMappingProviderTests
         Id = id,
         DeviceIdentifier = identifier,
         DeviceType = type,
+        DeviceStatus = DeviceStatus.Active,
         Ipaddress = "127.0.0.1",
         Location = new Location
         {

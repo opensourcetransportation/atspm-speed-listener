@@ -159,7 +159,7 @@ The pipeline shape is preserved. These specific behaviors are not, because each 
 
 **Unconditional TLS bypass.** `Program.cs` configures `DangerousAcceptAnyServerCertificateValidator` on the ingest HTTP client. The client is removed entirely with the API path, so this does not migrate.
 
-**Timestamp reinterpretation.** The parser's `DateTime.TryParse` plus `SpecifyKind(..., Utc)` can reinterpret values incorrectly. The implemented convention converts offset-bearing suffixes to UTC, uses UTC receipt time when the suffix is absent, and rejects invalid suffixes. `EventTimeZoneId` then selects the stored timestamp convention: UTC by default, or agency local wall-clock time for existing databases that require it. The host retains `Npgsql.EnableLegacyTimestampBehavior` because the ATSPM PostgreSQL model stores `DateTime` in `timestamp` columns. `DateTime` equality compares ticks rather than `Kind`, but captured production packets and a row-by-row comparison with `TransferSpeedEventsService` remain release gates before claiming wire compatibility.
+**Timestamp reinterpretation.** The parser's `DateTime.TryParse` plus `SpecifyKind(..., Utc)` can reinterpret values incorrectly. The implemented convention converts offset-bearing suffixes to UTC, uses UTC receipt time when the suffix is absent, and rejects invalid suffixes. `EventTimeZoneId` then selects the stored timestamp convention: the server local time zone by default, with an explicit agency zone recommended for containers and servers outside the agency zone. The host retains `Npgsql.EnableLegacyTimestampBehavior` because the ATSPM PostgreSQL model stores `DateTime` in `timestamp` columns. `DateTime` equality compares ticks rather than `Kind`, but captured production packets and a row-by-row comparison with `TransferSpeedEventsService` remain release gates before claiming wire compatibility.
 
 **Host shutdown budget.** The generic host's `ShutdownTimeout` defaults to five seconds and will terminate the process before a longer final flush completes. Configured from `ShutdownFlushTimeout`.
 
@@ -465,6 +465,45 @@ Origin envelopes remain attached for retries. The local EF writer also appends
 without value-based deduplication; replay fingerprints recognize one logical
 write rather than remove equal detections.
 
-Validation: 171 Release tests passed, including the dataflow step, identical
-occurrences and repeated references, location/hour/device/type grouping,
-cancellation, actual compression and SQLite insert/update replay behavior.
+The production archive path is covered by tests for identical occurrences and
+repeated references, hourly grouping, cancellation, actual compression and
+SQLite insert/update replay behavior.
+
+
+## ATSPM mapping and local workflow decisions
+
+Current-version selection matches ATSPM's `GetLatestVersionOfAllLocations(date)`:
+filter `VersionAction.Delete` before selecting the latest effective `Start <= date`.
+A deleted version is not a tombstone for the entire location identifier. Select
+only `DeviceStatus.Active` speed sensors on that selected version, taking the
+lowest device ID deterministically. If a non-deleted current version has no active
+speed sensor, do not fall back to a historical version's device.
+
+This sensor routing contract uses six ASCII detector digits: four location digits
+and two channel digits, as requested for this deployment. ATSPM's ten-character
+location capacity does not widen the wire identifier. Four numeric location digits
+are a deployment prerequisite; other identifiers are excluded and counted as
+invalid rather than silently truncated. Supporting them requires an explicit
+alternate detector-to-location contract.
+
+`EventBatchEnvelopeWorkflow` composes TPL Dataflow blocks directly instead of
+inheriting ATSPM `WorkflowBase`: it retains the originating envelope and logical
+hourly row across retries, carries shared cancellation through archive and writes,
+and reports committed versus conflicted hours separately. Using the packaged
+workflow unchanged would not provide those listener-specific callbacks and retry
+identity. The local archive implementation is derived from ATSPM and attributed.
+
+The local `IEventLogWriter` uses ATSPM's unchanged `EventLogContext`, model, keys,
+compression and schema instead of the repository Upsert extension. The packaged
+repository's write API has no cancellation token and its Upsert performs
+value-based union/hash-set deduplication, which would discard valid identical
+speed detections. The local writer passes cancellation into EF operations,
+preserves occurrence multiplicity, and recognizes one in-process logical retry
+using persisted-field fingerprints. One writer per stream/device-hour remains a
+requirement. These choices do not alter ATSPM's report repository behavior.
+
+Each flush still reads, decompresses, appends and recompresses a whole hourly row.
+Cost therefore increases with row age and uneven per-device traffic. The existing
+five-minute runs do not establish sustained peak capacity. A real paced test of
+at least two hours at the expected peak rate, with late-hour measurements and
+persisted-count verification, remains a release gate; see `load-testing.md`.

@@ -28,7 +28,7 @@ public sealed class SpeedLoadGeneratorTests
     {
         var timestamp = new DateTimeOffset(2026, 10, 9, 18, 0, 0, TimeSpan.Zero);
         var packet = SpeedTestPacket.Create("123401", 41, format, includeTimestamp ? timestamp : null);
-        var parser = new SpeedPacketParser();
+        var parser = new SpeedPacketParser(Options.Create(new SpeedListenerConfiguration { EventTimeZoneId = "UTC" }));
         var datagram = new UdpDatagram(packet, new IPEndPoint(IPAddress.Loopback, 1), timestamp.AddMinutes(1));
         var parsed = parser.Parse(datagram);
         Assert.True(parsed.IsSuccess, parsed.Error);
@@ -111,7 +111,7 @@ public sealed class SpeedLoadGeneratorTests
         var context = scope.ServiceProvider.GetRequiredService<ConfigContext>();
         Device Device(int id, string location, int year, LocationVersionActions action = default) => new()
         {
-            Id = id, DeviceIdentifier = $"name-{id}", DeviceType = DeviceTypes.SpeedSensor, Ipaddress = "192.0.2.1",
+            Id = id, DeviceIdentifier = $"name-{id}", DeviceType = DeviceTypes.SpeedSensor, DeviceStatus = DeviceStatus.Active, Ipaddress = "192.0.2.1",
             Location = new Location { Id = id, LocationIdentifier = location, PrimaryName = "Fixture", Note = "",
                 Start = new DateTime(year, 1, 1), VersionAction = action }
         };
@@ -122,14 +122,16 @@ public sealed class SpeedLoadGeneratorTests
         var deletedOld = Device(5, "3456", 2020);
         var deletedCurrent = Device(6, "3456", 2025, LocationVersionActions.Delete);
         var future = Device(7, "4567", 2099);
-        context.Devices.AddRange(old, current, extra, another, deletedOld, deletedCurrent, future);
+        var inactive = Device(8, "1234", 2025); inactive.Location = current.Location;
+        inactive.DeviceStatus = DeviceStatus.Inactive;
+        context.Devices.AddRange(old, current, extra, another, deletedOld, deletedCurrent, future, inactive);
         await context.SaveChangesAsync();
         var metrics = new SpeedListenerMetrics(TimeProvider.System);
         var provider = new DeviceMappingProvider(services.GetRequiredService<IServiceScopeFactory>(),
             Options.Create(new SpeedListenerConfiguration()), TimeProvider.System, metrics, NullLogger<DeviceMappingProvider>.Instance);
         var targets = await new DatabaseSpeedTargetProvider(provider, context).LoadAsync("02");
-        Assert.Equal(new[] { 2, 4 }, targets.Targets.Select(target => target.DeviceId));
-        Assert.Equal(new[] { "123402", "234502" }, targets.Targets.Select(target => target.DetectorId));
+        Assert.Equal(new[] { 2, 4, 5 }, targets.Targets.Select(target => target.DeviceId));
+        Assert.Equal(new[] { "123402", "234502", "345602" }, targets.Targets.Select(target => target.DetectorId));
         Assert.Equal(1, targets.ExtraDevicesAtSameLocation);
         Assert.Equal(0, targets.InvalidLocationIdentifiers);
     }

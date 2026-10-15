@@ -13,8 +13,8 @@ public sealed class SpeedListenerConfiguration
 {
     /// <summary>Gets or sets the UDP bind port.</summary>
     public int UdpPort { get; set; } = 10088;
-    /// <summary>Gets or sets the time zone used for stored ATSPM event timestamps.</summary>
-    public string EventTimeZoneId { get; set; } = "UTC";
+    /// <summary>Gets or sets the time zone used for stored ATSPM event timestamps; defaults to the server local zone.</summary>
+    public string EventTimeZoneId { get; set; } = TimeZoneInfo.Local.Id;
     /// <summary>Maps exact source IP:port endpoints to six-digit detector IDs for untagged XS messages.</summary>
     public List<UntaggedSpeedDetectorMapping> UntaggedSpeedDetectorMappings { get; set; } = new();
     /// <summary>Gets or sets the maximum number of queued events.</summary>

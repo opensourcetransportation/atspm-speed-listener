@@ -48,10 +48,10 @@ public static class HostBootstrapper
         .ApplyVolumeConfiguration(Path.Combine(AppContext.BaseDirectory, "Configuration"))
         .ConfigureServices((hostContext, services) =>
         {
+            services.AddSingleton<IValidateOptions<SpeedListenerConfiguration>, SpeedListenerConfigurationValidator>();
             services.AddOptions<SpeedListenerConfiguration>()
                 .Bind(hostContext.Configuration.GetSection(nameof(SpeedListenerConfiguration)))
                 .Configure(configureAction ?? (_ => { }))
-                .Validate(IsValidListenerConfiguration, "Speed listener configuration is missing or invalid.")
                 .ValidateOnStart();
             services.AddSingleton(TimeProvider.System);
             services.AddSingleton<SpeedListenerMetrics>();
@@ -95,11 +95,10 @@ public static class HostBootstrapper
             });
         builder.ConfigureServices((hostContext, services) =>
         {
+            services.AddSingleton<IValidateOptions<SpeedListenerConfiguration>, SpeedListenerConfigurationValidator>();
             services.AddOptions<SpeedListenerConfiguration>()
                 .Bind(hostContext.Configuration.GetSection(nameof(SpeedListenerConfiguration)))
                 .Configure(configureAction)
-                .Validate(IsValidListenerConfiguration,
-                    "Speed listener configuration is missing or invalid.")
                 .ValidateOnStart();
 
             services.AddOptions<HostOptions>()
@@ -133,49 +132,8 @@ public static class HostBootstrapper
     }
 
     /// <summary>Validates operational limits and room for at least one shutdown publish.</summary>
-    public static bool IsValidListenerConfiguration(SpeedListenerConfiguration configuration)
-    {
-        try { TimeZoneInfo.FindSystemTimeZoneById(configuration.EventTimeZoneId); }
-        catch (Exception ex) when (ex is TimeZoneNotFoundException or InvalidTimeZoneException or ArgumentException)
-        { return false; }
-        if (configuration.UntaggedSpeedDetectorMappings is null || configuration.UntaggedSpeedDetectorMappings.Any(mapping =>
-            mapping is null || !SourceAddressValidation.IsSupported(mapping.SourceAddress) || mapping.SourcePort is <= 0 or > 65535 ||
-            mapping.DetectorId is null || mapping.DetectorId.Length != 6 || mapping.DetectorId.Any(c => c < '0' || c > '9')))
-            return false;
-        if (configuration.UntaggedSpeedDetectorMappings.Select(mapping =>
-                SourceAddressValidation.EndpointKey(System.Net.IPAddress.Parse(mapping.SourceAddress), mapping.SourcePort))
-            .Distinct(StringComparer.Ordinal).Count() != configuration.UntaggedSpeedDetectorMappings.Count)
-            return false;
-        if (configuration.UdpPort is <= 0 or > 65535 ||
-            configuration.ChannelCapacity <= 0 ||
-            configuration.BatchSize <= 0 ||
-            configuration.BatchSize > configuration.ChannelCapacity ||
-            configuration.FlushInterval <= TimeSpan.Zero ||
-            configuration.ShutdownFlushTimeout <= TimeSpan.Zero ||
-            configuration.ShutdownMaxWriteAttempts <= 0 ||
-            configuration.MaxWriteAttempts <= 0 ||
-            configuration.ShutdownMaxWriteAttempts > configuration.MaxWriteAttempts ||
-            configuration.DeviceMappingRefreshInterval <= TimeSpan.Zero ||
-            configuration.ArchiveParallelism <= 0 ||
-            configuration.DatabaseWriteParallelism <= 0 ||
-            configuration.WriteTimeout <= TimeSpan.Zero ||
-            configuration.PoisonDeviceFailureThreshold <= 0 ||
-            configuration.SummaryInterval <= TimeSpan.Zero)
-            return false;
-
-        if (configuration.WriteTimeout.Ticks > TimeSpan.MaxValue.Ticks / configuration.ShutdownMaxWriteAttempts)
-            return false;
-
-        var shutdownWriteBudget = TimeSpan.FromTicks(
-            configuration.WriteTimeout.Ticks * configuration.ShutdownMaxWriteAttempts);
-        // This is a minimum, not a guarantee that all queued batches drain.
-        // The shared shutdown cancellation token bounds the complete backlog.
-        var retries = configuration.ShutdownMaxWriteAttempts - 1;
-        var exponentialRetries = Math.Min(retries, 8);
-        var retryDelayMilliseconds = 200 * (Math.Pow(2, exponentialRetries) - 1) + 100 * exponentialRetries
-            + (retries - exponentialRetries) * 30_100d;
-        return (configuration.ShutdownFlushTimeout - shutdownWriteBudget).TotalMilliseconds > retryDelayMilliseconds;
-    }
+    public static bool IsValidListenerConfiguration(SpeedListenerConfiguration configuration) =>
+        new SpeedListenerConfigurationValidator().Validate(null, configuration).Succeeded;
 
     [SupportedOSPlatform("windows")]
     private static void TryConfigureWindowsEventLog(ILoggingBuilder logging)

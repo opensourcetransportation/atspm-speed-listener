@@ -47,11 +47,11 @@ public sealed class DeviceMappingProvider(
             var now = DateTime.SpecifyKind(TimeZoneInfo.ConvertTime(timeProvider.GetUtcNow(), zone).DateTime, DateTimeKind.Unspecified);
             var locations = await context.Locations
                 .AsNoTracking()
-                .Where(location => location.Start <= now)
+                .Where(location => location.Start <= now && location.VersionAction != LocationVersionActions.Delete)
                 .Select(location => new
                 {
                     location.Id, location.LocationIdentifier, location.Start, location.VersionAction,
-                    DeviceId = location.Devices.Where(device => device.DeviceType == DeviceTypes.SpeedSensor)
+                    DeviceId = location.Devices.Where(device => device.DeviceType == DeviceTypes.SpeedSensor && device.DeviceStatus == DeviceStatus.Active)
                         .OrderBy(device => device.Id).Select(device => (int?)device.Id).FirstOrDefault()
                 })
                 .ToListAsync(cancellationToken);
@@ -63,7 +63,7 @@ public sealed class DeviceMappingProvider(
                          StringComparer.OrdinalIgnoreCase))
             {
                 var identifier = versions.Key;
-                if (identifier.Length != 4)
+                if (identifier.Length != 4 || identifier.Any(c => c is < '0' or > '9'))
                 {
                     invalidCount++;
                     continue;
@@ -73,15 +73,13 @@ public sealed class DeviceMappingProvider(
                 // Historical versions are expected. Only tied effective dates are
                 // ambiguous; the highest ID remains the deterministic winner.
                 duplicateCount += versions.Count(location => location.Start == current.Start) - 1;
-                if (current.VersionAction == LocationVersionActions.Delete)
-                    continue;
                 if (!current.DeviceId.HasValue)
                     continue;
                 updated.Add(identifier, new DeviceMapping(current.DeviceId.Value, identifier));
             }
 
             // Fail an unconfigured startup, but a successful refresh may legitimately
-            // remove every mapping. Retaining the old cache would resurrect deletions.
+            // remove every mapping when no eligible location/device remains.
             if (updated.Count == 0 && _mappings is null)
                 throw new InvalidOperationException(
                     $"No valid speed-sensor mappings were found ({invalidCount} invalid, {duplicateCount} duplicate rows).");

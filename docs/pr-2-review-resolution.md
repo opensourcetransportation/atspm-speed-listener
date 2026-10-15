@@ -9,11 +9,11 @@ changed during this work.
 | Retries repeat committed envelopes | Repeated writes existed, but double-counting was not reproduced: the packaged Upsert unions events using value equality. Retries now track acknowledged rows by originating envelope and hour, and skip those rows during retries and poison isolation. The October 13 follow-up replaces value-equality union with retained before/after payloads, recognizing an uncertain committed result while preserving identical distinct events. |
 | Poison threshold aborts later healthy envelopes | Confirmed. Threshold exceptions are deferred until the remaining isolated envelopes have been attempted. |
 | Upsert ignores cancellation | Confirmed. The package repository API has no cancellation token. A local `EfEventLogWriter` uses the packaged context, model, primary keys and compression, passing the token to `FindAsync`, `AddAsync` and `SaveChangesAsync`, while preserving duplicate-event multiplicity through the base payload accessor. The NuGet binaries remain unchanged. The local archive step is derived from ATSPM's `Atspm/Infrastructure/WorkflowSteps/ArchiveDataEvents.cs` and retains its upstream Apache license header. |
-| Deleted locations resolve to old versions | Confirmed. Current version selection now includes deletions; a current deletion suppresses the location instead of falling back. An older deletion does not suppress a later active version. |
+| Deleted locations resolve to old versions | Earlier finding withdrawn after checking ATSPM current-version semantics. Deleted versions are excluded before picking the latest effective version; the previous eligible version becomes current. Active speed sensors are selected on that version. |
 | Duplicate count stays zero | Confirmed. Rows tied at the current effective date now increment the duplicate counter. Historical versions are expected and are not counted as duplicate mappings. The highest location ID wins ties. |
 | Refresh cancellation logs failure | Confirmed. Caller cancellation propagates without a warning or refresh-failure increment. |
 | Shutdown validation assumes one batch | The budget was never a guarantee that an entire bounded queue could drain. Validation now includes capped retry delays for one publish, documents that minimum, and every batch started during shutdown receives the shutdown attempt limit. The shared cancellation token bounds the backlog, including EF writes. |
-| UTC differs from local ATSPM time | UTC was an explicit design convention, so changing every deployment to the server's local zone would be unsafe. `EventTimeZoneId` now lets agencies select their database's convention. UTC remains the default; non-UTC events use local wall-clock values with unspecified Kind. Seasonal conversion tests cover receipt and offset-bearing suffix timestamps. |
+| UTC differs from local ATSPM time | UTC was an explicit design convention, so changing every deployment to the server's local zone would be unsafe. `EventTimeZoneId` now lets agencies select their database's convention. The later ATSPM convention follow-up changes the omitted-setting default to the server local zone; explicit UTC remains supported. Non-UTC events use local wall-clock values with unspecified Kind. Seasonal conversion tests cover receipt and offset-bearing suffix timestamps. |
 | Upgrade uses only appsettings port | Confirmed. A running service's actual UDP binding determines readiness, including environment, mounted configuration and command-line overrides. `-ExpectedPort` provides an explicit choice. Ambiguous bindings are rejected before stopping the service. |
 | JToken event round trip | Confirmed. Envelopes now retain typed `IReadOnlyList<SpeedEvent>` collections and archive directly into typed hourly lists, removing JSON conversion and reflection from that stage. |
 
@@ -114,3 +114,26 @@ poison failure cannot cause the conflicted device to be treated as successful.
 
 Validation: 176 Release C# tests passed; IPv6 loopback tests ran on an IPv6-capable
 host. Deployment scripts remain unchanged from their prior validated scenarios.
+
+
+## ATSPM current-version and deployment follow-up
+
+Deleted location versions are now excluded before current-version selection,
+matching ATSPM's dated latest-version query. Only Active speed devices participate
+in listener mapping and generator discovery; inactive devices never displace an
+active replacement. Tests cover deletion rollback, removal of all eligible versions,
+all non-active statuses, and no historical-device fallback from an active version.
+
+Omitted EventTimeZoneId now uses the server local zone, including direct parser
+construction. The shipped JSON no longer forces UTC. Explicit existing UTC values
+are preserved by upgrades and must be corrected by the operator when appropriate.
+Options validation now reports individual fields, endpoint-list indexes, and
+cross-field shutdown budget requirements in both listener and generator hosts.
+Four-digit numeric routing is documented as a protocol deployment prerequisite.
+The design records why cancellable, duplicate-preserving writes and envelope
+retry tracking require local workflow/repository adapters.
+
+The previous short load tests remain short-run evidence only. Two hours of paced
+peak traffic with growing hourly rows and stored-count reconciliation is still
+required before claiming sustained capacity. No such result is claimed here. All 190 Release C# tests pass for the current
+correctness and configuration changes.

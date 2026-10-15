@@ -11,9 +11,13 @@ disable migrations for a listener-only deployment. Repository defaults do not
 contain deployment credentials.
 
 Set `SpeedListenerConfiguration.EventTimeZoneId` to match your existing event-log
-timestamps. It defaults to `UTC`; use a zone such as `America/Denver` for a database
+timestamps. It defaults to the Windows server local time zone; explicitly use a zone such as
+`America/Denver` for a database
 that stores that agency's local wall-clock time. Verify this choice before cutover;
-changing it does not convert existing records.
+changing it does not convert existing records. Existing configuration that explicitly
+sets `UTC` remains UTC after an upgrade; change that value if the database stores
+agency local time. Containers commonly use UTC as their local zone, so configure
+the agency zone explicitly there.
 
 If you include credentials in a deployment ZIP, restrict access to both the ZIP
 and installed directory. Keep credential-bearing packages out of source control.

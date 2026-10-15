@@ -7,7 +7,19 @@ namespace SpeedListener.Tests;
 
 public sealed class SpeedPacketParserTests
 {
-    private readonly SpeedPacketParser _parser = new();
+    private readonly SpeedPacketParser _parser = new(Microsoft.Extensions.Options.Options.Create(
+        new SpeedListener.Configuration.SpeedListenerConfiguration { EventTimeZoneId = "UTC" }));
+
+    [Fact]
+    public void Parse_DefaultTimeZoneUsesServerLocalWallClock()
+    {
+        var receipt = new DateTimeOffset(2026, 9, 2, 18, 0, 0, TimeSpan.Zero);
+        var expected = TimeZoneInfo.ConvertTime(receipt, TimeZoneInfo.Local).DateTime;
+        var packet = Datagram(Packet("502620", 25, 40)) with { ReceivedAt = receipt };
+        Assert.Equal(expected, new SpeedPacketParser().Parse(packet).Event!.Timestamp);
+        Assert.Equal(expected, new SpeedPacketParser(Microsoft.Extensions.Options.Options.Create(
+            new SpeedListener.Configuration.SpeedListenerConfiguration())).Parse(packet).Event!.Timestamp);
+    }
 
     [Theory]
     [InlineData("5A34FFFFFF0004050F0451000100006B")]

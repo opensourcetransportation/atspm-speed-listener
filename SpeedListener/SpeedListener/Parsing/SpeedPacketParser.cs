@@ -14,7 +14,7 @@ public sealed class SpeedPacketParser(IOptions<SpeedListenerConfiguration>? opti
         (options?.Value.UntaggedSpeedDetectorMappings ?? new()).ToDictionary(
             mapping => SourceAddressValidation.EndpointKey(System.Net.IPAddress.Parse(mapping.SourceAddress), mapping.SourcePort),
             mapping => mapping.DetectorId, StringComparer.Ordinal);
-    private readonly TimeZoneInfo _eventTimeZone = TimeZoneInfo.FindSystemTimeZoneById(options?.Value.EventTimeZoneId ?? "UTC");
+    private readonly TimeZoneInfo _eventTimeZone = TimeZoneInfo.FindSystemTimeZoneById(options?.Value.EventTimeZoneId ?? TimeZoneInfo.Local.Id);
 
     /// <inheritdoc/>
     public SpeedPacketParseResult Parse(UdpDatagram datagram)

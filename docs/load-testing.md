@@ -79,8 +79,8 @@ at the requested schedule and avoids accidental value-equality collapse during
 fast tests. The listener converts those instants using its `EventTimeZoneId`.
 
 Use `--no-timestamps` to exercise the normal sensor format with listener receipt
-times. Multiple otherwise equal events can then collapse under ATSPM's existing
-value-equality storage rule. Timestamped generator traffic is larger than ordinary
+times. The listener preserves otherwise equal occurrences; the standard ATSPM archive
+workflow and Upsert may deduplicate if used instead. Timestamped generator traffic is larger than ordinary
 sensor traffic, so choose the format that matches the measurement you need.
 
 Speeds vary from 20 through 80 MPH by default. `--min-mph`, `--max-mph`, and
@@ -113,10 +113,37 @@ not acknowledge receipt or persistence. A send error stops the test and returns
 exit code 1; Ctrl+C returns 130.
 
 Compare counter changes on the listener, especially `Received`, `Parsed`,
-`Rejected`, `Unknown`, `Dropped`, `ChannelDepth`, `PublishFailures` and archived
+`Rejected`, `UnknownSinceLast`, `Dropped`, `ChannelDepth`, `PublishFailures` and archived
 envelopes. One generator event is one datagram; multiple events share each hourly
 envelope, so envelope counts should not equal event counts. Allow the listener's
 configured flush interval to elapse and its queue to drain before comparing stored
 event totals. Use an otherwise isolated stream or capture starting counters so
 ordinary sensor traffic does not obscure the comparison. UDP sends alone cannot
 prove that a firewall passed the traffic or that the database archived it.
+
+
+## Sustained capacity release gate
+
+The five-minute test in `docker-load-test-results.md` does not validate a full
+hour's row growth. Run at least 7,200 seconds at the expected peak aggregate rate
+against isolated local test databases. For the UDOT target, 334 events/second is
+20,040/minute and yields approximately 2,404,800 events over two hours. Do not set
+an earlier count limit. Start around an hour boundary, or run longer than two hours
+to include two complete hourly growth cycles. Explicitly configure the agency
+EventTimeZoneId for both discovery and the receiving listener.
+
+```powershell
+.\SpeedListener.exe generate --host <test-listener-host> --port <test-port> `
+    --rate 334 --duration 7200 --format compact
+```
+
+Capture listener summaries, database write timings, CPU and memory throughout;
+compare early-hour versus late-hour write latency rather than relying on the
+lifetime average. Include representative device distribution and a concentrated
+hot-device run, because uniform traffic splits hourly row sizes across devices.
+Retain starting/ending counters, verify all sent events against decompressed
+stored payloads after the final flush, and check hourly boundaries separately.
+Expected conditions: no rejected/unknown/dropped events or unaccounted conflicts,
+no persistent queue growth, no publish failures, and all acknowledged occurrences
+present in storage. Report actual pacing and elapsed wall time. An accelerated
+synthetic timestamp range is not a two-hour sustained test.

@@ -160,6 +160,44 @@ public sealed class HostBootstrapperTests
         Assert.False(HostBootstrapper.IsValidListenerConfiguration(config));
     }
 
+    [Fact]
+    public void OmittedTimeZoneUsesServerLocalZone()
+    {
+        using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(
+            """{ "SpeedListenerConfiguration": { "UdpPort": 10089 } }"""));
+        var configuration = new ConfigurationBuilder().AddJsonStream(stream).Build();
+        var options = configuration.GetSection("SpeedListenerConfiguration").Get<SpeedListenerConfiguration>()!;
+        Assert.Equal(TimeZoneInfo.Local.Id, options.EventTimeZoneId);
+    }
+
+    [Fact]
+    public void GeneratorValidationNamesEachInvalidSettingAndMappingIndex()
+    {
+        var error = Assert.Throws<Microsoft.Extensions.Options.OptionsValidationException>(() =>
+            HostBootstrapper.BuildGeneratorHost(config => {
+                config.UdpPort = 0;
+                config.EventTimeZoneId = "invalid-zone";
+                config.BatchSize = config.ChannelCapacity + 1;
+                config.UntaggedSpeedDetectorMappings = new() { new() { SourceAddress = "bad", SourcePort = 0, DetectorId = "bad" } };
+            }));
+        foreach (var setting in new[] { "UdpPort", "EventTimeZoneId", "BatchSize", "UntaggedSpeedDetectorMappings[0].SourceAddress",
+                     "UntaggedSpeedDetectorMappings[0].SourcePort", "UntaggedSpeedDetectorMappings[0].DetectorId" })
+            Assert.Contains(error.Failures, message => message.Contains(setting));
+    }
+
+    [Fact]
+    public void ValidationExplainsShutdownOverflowAndBudgetFailures()
+    {
+        var config = ValidConfiguration();
+        config.WriteTimeout = TimeSpan.MaxValue;
+        var validator = new SpeedListenerConfigurationValidator();
+        Assert.Contains(validator.Validate(null, config).Failures!, failure =>
+            failure.Contains("WriteTimeout") && failure.Contains("supported duration"));
+        config.WriteTimeout = TimeSpan.FromSeconds(10);
+        Assert.Contains(validator.Validate(null, config).Failures!, failure =>
+            failure.Contains("ShutdownFlushTimeout") && failure.Contains("retry delays"));
+    }
+
     private static SpeedListenerConfiguration ValidConfiguration() => new()
     {
         UdpPort = 10088,

@@ -56,7 +56,9 @@ public static class HostBootstrapper
             services.AddSingleton(TimeProvider.System);
             services.AddSingleton<SpeedListenerMetrics>();
             services.AddAtspmDbContext(hostContext);
-            services.AddSingleton<IDeviceMappingProvider, DeviceMappingProvider>();
+            services.AddSingleton<DeviceMappingProvider>();
+            services.AddSingleton<IDeviceMappingProvider>(provider => provider.GetRequiredService<DeviceMappingProvider>());
+            services.AddSingleton<ILocationTimeZoneProvider>(provider => provider.GetRequiredService<DeviceMappingProvider>());
             services.AddScoped<DatabaseSpeedTargetProvider>();
         }).Build();
         try
@@ -111,7 +113,9 @@ public static class HostBootstrapper
             services.AddAtspmEFEventLogRepositories();
             services.AddScoped<IEventLogWriter, EfEventLogWriter>();
             services.AddSingleton<ISpeedPacketParser, SpeedPacketParser>();
-            services.AddSingleton<IDeviceMappingProvider, DeviceMappingProvider>();
+            services.AddSingleton<DeviceMappingProvider>();
+            services.AddSingleton<IDeviceMappingProvider>(provider => provider.GetRequiredService<DeviceMappingProvider>());
+            services.AddSingleton<ILocationTimeZoneProvider>(provider => provider.GetRequiredService<DeviceMappingProvider>());
             services.AddSingleton<IEventPublisher<EventBatchEnvelope>, DatabaseEventPublisher>();
             services.AddSingleton<ISpeedEventBatchProcessor, SpeedEventBatchProcessor>();
             services.AddSingleton<IUdpDatagramReceiver>(serviceProvider =>

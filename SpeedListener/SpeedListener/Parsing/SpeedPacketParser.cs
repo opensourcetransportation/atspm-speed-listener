@@ -1,4 +1,5 @@
 using SpeedListener.Receivers;
+using SpeedListener.Services;
 using System.Globalization;
 using System.Text;
 using Microsoft.Extensions.Options;
@@ -8,7 +9,7 @@ using Utah.Udot.Atspm.Data.Models.EventLogModels;
 namespace SpeedListener.Parsing;
 
 /// <summary>Parses legacy prefixed speed packets and compact packets beginning with XS.</summary>
-public sealed class SpeedPacketParser(IOptions<SpeedListenerConfiguration>? options = null) : ISpeedPacketParser
+public sealed class SpeedPacketParser(IOptions<SpeedListenerConfiguration>? options = null, ILocationTimeZoneProvider? locationTimeZones = null) : ISpeedPacketParser
 {
     private readonly IReadOnlyDictionary<string, string> _untaggedMappings =
         (options?.Value.UntaggedSpeedDetectorMappings ?? new()).ToDictionary(
@@ -85,7 +86,7 @@ public sealed class SpeedPacketParser(IOptions<SpeedListenerConfiguration>? opti
             return SpeedPacketParseResult.Success(new SpeedEvent
             {
                 DetectorId = mappedDetector, Mph = data[speedOffset], Kph = data[speedOffset + 1],
-                Timestamp = ConvertTimestamp(datagram.ReceivedAt.UtcDateTime)
+                Timestamp = ConvertTimestamp(datagram.ReceivedAt.UtcDateTime, ZoneFor(mappedDetector))
             });
         }
         if (data.Length < timestampOffset)
@@ -102,6 +103,7 @@ public sealed class SpeedPacketParser(IOptions<SpeedListenerConfiguration>? opti
         if (detectorId.Length != 6 || detectorId.Any(c => c < '0' || c > '9'))
             return SpeedPacketParseResult.Failure("The speed packet must contain a six-digit detector identifier for ATSPM mapping.");
 
+        var eventTimeZone = ZoneFor(detectorId);
         var timestamp = datagram.ReceivedAt.UtcDateTime;
         var bodyLength = data.Length;
         if (bodyLength >= 3 && data[bodyLength - 3] == (byte)'~' && data[bodyLength - 2] == 13 && data[bodyLength - 1] == 13)
@@ -127,14 +129,14 @@ public sealed class SpeedPacketParser(IOptions<SpeedListenerConfiguration>? opti
                     if (!DateTime.TryParse(timestampText, CultureInfo.InvariantCulture, DateTimeStyles.None, out var localTime))
                         return SpeedPacketParseResult.Failure("Unexpected bytes after the detector identifier; expected a terminator or timestamp.");
                     localTime = DateTime.SpecifyKind(localTime, DateTimeKind.Unspecified);
-                    if (_eventTimeZone.IsInvalidTime(localTime))
-                        return SpeedPacketParseResult.Failure("Sensor timestamp is invalid in EventTimeZoneId; supply an explicit UTC offset.");
-                    timestamp = _eventTimeZone.IsAmbiguousTime(localTime)
-                        ? _eventTimeZone.GetAmbiguousTimeOffsets(localTime)
+                    if (eventTimeZone.IsInvalidTime(localTime))
+                        return SpeedPacketParseResult.Failure("Sensor timestamp is invalid in the location time zone; supply an explicit UTC offset.");
+                    timestamp = eventTimeZone.IsAmbiguousTime(localTime)
+                        ? eventTimeZone.GetAmbiguousTimeOffsets(localTime)
                             .Select(offset => new DateTimeOffset(localTime, offset).UtcDateTime)
                             .OrderBy(candidate => Math.Abs((candidate - datagram.ReceivedAt.UtcDateTime).Ticks))
                             .ThenBy(candidate => candidate).First()
-                        : TimeZoneInfo.ConvertTimeToUtc(localTime, _eventTimeZone);
+                        : TimeZoneInfo.ConvertTimeToUtc(localTime, eventTimeZone);
                 }
             }
         }
@@ -144,9 +146,12 @@ public sealed class SpeedPacketParser(IOptions<SpeedListenerConfiguration>? opti
             DetectorId = detectorId,
             Mph = data[speedOffset],
             Kph = data[speedOffset + 1],
-            Timestamp = ConvertTimestamp(timestamp)
+            Timestamp = ConvertTimestamp(timestamp, eventTimeZone)
         });
     }
-    private DateTime ConvertTimestamp(DateTime timestamp) => _eventTimeZone.Equals(TimeZoneInfo.Utc) ? timestamp
-        : DateTime.SpecifyKind(TimeZoneInfo.ConvertTimeFromUtc(timestamp, _eventTimeZone), DateTimeKind.Unspecified);
+    private TimeZoneInfo ZoneFor(string detectorId) =>
+        locationTimeZones?.GetTimeZone(detectorId[..4]) ?? _eventTimeZone;
+
+    private static DateTime ConvertTimestamp(DateTime timestamp, TimeZoneInfo zone) =>
+        DateTime.SpecifyKind(TimeZoneInfo.ConvertTimeFromUtc(timestamp, zone), DateTimeKind.Unspecified);
 }

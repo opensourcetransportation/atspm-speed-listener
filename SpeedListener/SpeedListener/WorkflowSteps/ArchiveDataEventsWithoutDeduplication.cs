@@ -37,6 +37,7 @@ public static class ArchiveDataEventsWithoutDeduplication
         {
             cancellationToken.ThrowIfCancellationRequested();
             item.LocationIdentifier = envelope.LocationIdentifier;
+            item.Timestamp = DateTime.SpecifyKind(item.Timestamp, DateTimeKind.Unspecified);
         }
         var groups = envelope.Items.GroupBy(item =>
             (item.Timestamp.Year, item.Timestamp.Month, item.Timestamp.Day, item.Timestamp.Hour));

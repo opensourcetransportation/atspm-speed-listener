@@ -137,3 +137,25 @@ The previous short load tests remain short-run evidence only. Two hours of paced
 peak traffic with growing hourly rows and stored-count reconciliation is still
 required before claiming sustained capacity. No such result is claimed here. All 190 Release C# tests pass for the current
 correctness and configuration changes.
+
+
+## Coordinate-derived location zones
+
+Coordinate lookup now overrides the configured fallback for valid locations,
+matching ATSPM's device-importer approach. The selected location zone is cached
+with device mappings and used both for packet timestamps and effective-date
+cutoffs. Invalid/missing coordinates use EventTimeZoneId (default server local)
+and produce an aggregate refresh warning. All persisted timestamp values and
+hourly keys have Unspecified Kind, including UTC. No zone information is stored.
+
+New coverage includes multi-zone receipt/offset/untagged packets, Utah/New York
+seasonal changes, Arizona DST behavior, offset-less timestamps, invalid coordinates,
+per-location version cutoffs, cached/refreshing zones and shared singleton wiring.
+All five relational providers have timestamp model/schema/compression tests.
+SQLite and disposable PostgreSQL additionally passed live insert/append round
+trips with identical events and fractional timestamp precision. Live SQL Server,
+MySQL and Oracle probes remain unrun; the opt-in DatabaseProviderSmoke tool supports
+those engines without changing application registrations.
+
+Validation: 214 Release C# tests passed; the opt-in PostgreSQL smoke probe also
+passed against a fresh disposable PostgreSQL 16 container.

@@ -159,7 +159,7 @@ The pipeline shape is preserved. These specific behaviors are not, because each 
 
 **Unconditional TLS bypass.** `Program.cs` configures `DangerousAcceptAnyServerCertificateValidator` on the ingest HTTP client. The client is removed entirely with the API path, so this does not migrate.
 
-**Timestamp reinterpretation.** The parser's `DateTime.TryParse` plus `SpecifyKind(..., Utc)` can reinterpret values incorrectly. The implemented convention converts offset-bearing suffixes to UTC, uses UTC receipt time when the suffix is absent, and rejects invalid suffixes. `EventTimeZoneId` then selects the stored timestamp convention: the server local time zone by default, with an explicit agency zone recommended for containers and servers outside the agency zone. The host retains `Npgsql.EnableLegacyTimestampBehavior` because the ATSPM PostgreSQL model stores `DateTime` in `timestamp` columns. `DateTime` equality compares ticks rather than `Kind`, but captured production packets and a row-by-row comparison with `TransferSpeedEventsService` remain release gates before claiming wire compatibility.
+**Timestamp reinterpretation.** The parser's `DateTime.TryParse` plus `SpecifyKind(..., Utc)` can reinterpret values incorrectly. The implemented convention converts offset-bearing suffixes to UTC, uses UTC receipt time when the suffix is absent, and rejects invalid suffixes. The location's coordinates select its stored wall-clock zone; `EventTimeZoneId` is fallback only for unusable coordinates and defaults to server local. Every stored DateTime has Unspecified Kind. The host retains `Npgsql.EnableLegacyTimestampBehavior` because the ATSPM PostgreSQL model stores `DateTime` in `timestamp` columns. `DateTime` equality compares ticks rather than `Kind`, but captured production packets and a row-by-row comparison with `TransferSpeedEventsService` remain release gates before claiming wire compatibility.
 
 **Host shutdown budget.** The generic host's `ShutdownTimeout` defaults to five seconds and will terminate the process before a longer final flush completes. Configured from `ShutdownFlushTimeout`.
 
@@ -507,3 +507,44 @@ Cost therefore increases with row age and uneven per-device traffic. The existin
 five-minute runs do not establish sustained peak capacity. A real paced test of
 at least two hours at the expected peak rate, with late-hour measurements and
 persisted-count verification, remains a release gate; see `load-testing.md`.
+
+
+## Location-derived time zones and database timestamp compatibility
+
+`DeviceMappingProvider` resolves each location version's latitude/longitude using
+GeoTimeZone, matching the device importer approach in the Gilbert ATSPM checkout.
+It caches lookups by coordinate pair within a refresh and atomically publishes a
+mapping snapshot containing each selected device's resolved `TimeZoneInfo`.
+`ILocationTimeZoneProvider` exposes that same singleton snapshot to the parser;
+packet parsing performs no database or geographic lookup. Refreshes update zones
+with mappings. Missing/nonfinite/out-of-range coordinates and `(0, 0)` use the
+configured EventTimeZoneId fallback (default server local), with one aggregate
+warning per refresh containing the fallback count and zone. Debug logs identify
+each mapped location's resolved zone and whether it uses fallback.
+
+Version eligibility compares each candidate's Start to the current wall clock in
+that candidate location's zone. Deleted versions are filtered first. This avoids
+using a server-wide cutoff for locations in different zones. Tagged and explicitly
+mapped untagged packets use the selected location zone; unknown locations use the
+fallback until routable. Offset-less suffixes are interpreted in the location zone,
+while offset-bearing suffixes and receipt times are instants converted into it.
+Existing DST handling is retained. Every output DateTime is Unspecified, even for
+UTC; archiving also strips Kind without changing the already-normalized wall digits.
+No offset or zone identifier is persisted in event payloads or hourly keys.
+
+The ATSPM packaged context, compression and provider registrations are unchanged.
+Npgsql's legacy timestamp switch remains enabled before listener/generator database
+registration. Cross-provider tests verify actual EF mappings and schema generation:
+PostgreSQL timestamp without time zone, SQL Server datetime2, MySQL datetime,
+Oracle TIMESTAMP, SQLite TEXT. Compression round trips preserve full event ticks
+and Unspecified Kind for every provider; event times are inside the compressed
+payload and are not rounded to the hourly key column's precision.
+
+SQLite and disposable PostgreSQL live insert/append probes preserve hourly keys,
+wall-clock timestamps, full fractional precision and identical occurrences. SQL
+Server/MySQL/Oracle currently have model/schema/compression coverage only, not live
+engine results. `tests/DatabaseProviderSmoke` is an opt-in actual engine probe for
+all supported relational providers; give it an empty disposable database and set
+ATSPM_PROVIDER_SMOKE_CONNECTION. It refuses a database with an existing schema.
+The probe creates test tables/data and intentionally does not delete a supplied
+database. For PostgreSQL, validation used a temporary container removed afterward.

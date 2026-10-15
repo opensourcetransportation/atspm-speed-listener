@@ -10,14 +10,15 @@ library validates all four database contexts; configure each required context an
 disable migrations for a listener-only deployment. Repository defaults do not
 contain deployment credentials.
 
-Set `SpeedListenerConfiguration.EventTimeZoneId` to match your existing event-log
-timestamps. It defaults to the Windows server local time zone; explicitly use a zone such as
-`America/Denver` for a database
-that stores that agency's local wall-clock time. Verify this choice before cutover;
-changing it does not convert existing records. Existing configuration that explicitly
-sets `UTC` remains UTC after an upgrade; change that value if the database stores
-agency local time. Containers commonly use UTC as their local zone, so configure
-the agency zone explicitly there.
+The listener derives each mapped location's zone from its latitude/longitude.
+`SpeedListenerConfiguration.EventTimeZoneId` is the fallback only when coordinates
+are missing, invalid or `(0, 0)`; it defaults to the Windows server local zone.
+Set that fallback explicitly to the agency zone when deploying outside that zone
+or in containers. Valid coordinates take precedence even if an older configuration
+sets UTC. Each mapping refresh reports the number of locations using fallback.
+All event timestamps and hourly keys are stored as local wall time without time-zone
+metadata. Verify coordinates and fallback before cutover; this does not convert
+existing records.
 
 If you include credentials in a deployment ZIP, restrict access to both the ZIP
 and installed directory. Keep credential-bearing packages out of source control.

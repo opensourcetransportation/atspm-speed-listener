@@ -60,7 +60,7 @@ format, for example `SpeedListenerConfiguration__UdpPort=10088`.
 | Setting | Default | Description |
 | --- | ---: | --- |
 | `UdpPort` | `10088` | UDP bind port |
-| `EventTimeZoneId` | Server local time zone | Time zone for stored events; set to the agency database's convention, for example `America/Denver` |
+| `EventTimeZoneId` | Server local time zone | Fallback for unusable coordinates; valid location coordinates determine the event zone |
 | `UntaggedSpeedDetectorMappings` | `[]` | Explicit source IP:port to six-digit detector mapping for basic XS messages |
 | `ChannelCapacity` | `100000` | Maximum queued parsed events |
 | `BatchSize` | `5000` | Size-triggered flush threshold |
@@ -94,7 +94,7 @@ for sink limits and Docker configuration.
 Routing uses the first four characters of the packet detector identifier as the
 location identifier (for example, `502620` routes to `5026`). The current location
 version has the latest non-deleted `Start` at or before the refresh time in
-`EventTimeZoneId`. Equal dates use the highest location ID and count the remaining
+the location's coordinate-derived time zone (or `EventTimeZoneId` fallback). Equal dates use the highest location ID and count the remaining
 tied rows as duplicates. Its lowest-ID active SpeedSensor device is selected.
 Older versions are not used when the current non-deleted version lacks an active
 SpeedSensor. All channels at that location share the selected device; full detector
@@ -106,7 +106,7 @@ four ASCII location digits followed by two channel digits. ATSPM supports locati
 identifiers up to ten characters, but other lengths and nonnumeric identifiers
 are not addressable by this routing scheme. They are reported as invalid mappings;
 they are never truncated into potentially conflicting locations. The latest
-non-deleted version effective at the agency wall clock is selected, then its
+non-deleted version effective at the location wall clock is selected, then its
 lowest-ID active SpeedSensor. Deleting a version allows the previous eligible
 version to become current, matching ATSPM; an inactive device never wins selection.
 
@@ -166,14 +166,20 @@ poison-drop history from being reset, including during isolated retries. No data
 required; retry state lasts only for the current publish operation.
 
 Receipt times and explicitly offset sensor timestamps are instants converted
-to `EventTimeZoneId` for storage. Offset-less sensor timestamps are interpreted
-as wall-clock time in that zone. Repeated fall-back times use the occurrence
-closest to packet receipt; the wall-clock timestamp and all events are retained.
-Nonexistent spring-forward times still require an explicit offset. The server local time zone is the default. For an agency database
-that stores local wall-clock times, configure its zone before ingesting data;
-non-UTC storage uses `DateTimeKind.Unspecified`. Match the existing database's
-convention, including its treatment of repeated hours when daylight saving ends.
-Changing the setting does not migrate existing records.
+to the mapped location's time zone, derived from latitude/longitude with
+GeoTimeZone. Zones are cached with the current device mappings; there is no database
+or coordinate lookup per packet. Location effective dates use the same derived
+zone. Missing, invalid or `(0, 0)` coordinates use `EventTimeZoneId`, which defaults
+to the server local zone; a bounded warning reports the fallback count each refresh.
+Debug identifies each mapped location's zone and fallback status. An explicit
+fallback setting does not override a valid coordinate-derived zone.
+
+Offset-less sensor timestamps are interpreted as local time in that location zone.
+Repeated fall-back times select the occurrence closest to packet receipt; all
+occurrences are retained. Nonexistent spring-forward times require an explicit
+offset. All stored event timestamps and hourly keys use `DateTimeKind.Unspecified`,
+including UTC locations/fallbacks: wall-clock digits are stored without time-zone
+metadata. Changing coordinates or the fallback does not migrate existing records.
 
 The in-memory channel is bounded. When it is full, the newest event is dropped
 and counted in rate-limited summary logs. UDP itself is not reliable, and this release has no durable spool, so

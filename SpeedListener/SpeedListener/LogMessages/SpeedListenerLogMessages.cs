@@ -58,6 +58,14 @@ public partial class SpeedListenerLogMessages(ILogger logger)
         Message = "Device mapping refresh failed; continuing with the last successful mapping")]
     public partial void MappingRefreshFailed(Exception exception);
 
+    [LoggerMessage(EventId = 3013, EventName = "Location Time Zone Fallback", Level = LogLevel.Warning,
+        Message = "SpeedListenerTimeZoneFallback Locations={count} FallbackTimeZoneId={timeZoneId}; missing or unusable coordinates require the fallback zone")]
+    public partial void TimeZoneFallback(int count, string timeZoneId);
+
+    [LoggerMessage(EventId = 3014, EventName = "Location Time Zone", Level = LogLevel.Debug,
+        Message = "SpeedListenerLocationTimeZone LocationIdentifier={locationIdentifier} TimeZoneId={timeZoneId} UsesFallback={usesFallback}")]
+    public partial void LocationTimeZone(string locationIdentifier, string timeZoneId, bool usesFallback);
+
     [LoggerMessage(EventId = 3030, EventName = "Batch Processed", Level = LogLevel.Information,
         Message = "Processed batch of {eventCount} events into {envelopeCount} envelopes")]
     public partial void BatchProcessed(int eventCount, int envelopeCount);

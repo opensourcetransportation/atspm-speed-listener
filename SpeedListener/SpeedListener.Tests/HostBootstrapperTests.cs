@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using SpeedListener.Configuration;
 
 namespace SpeedListener.Tests;
@@ -196,6 +197,14 @@ public sealed class HostBootstrapperTests
         config.WriteTimeout = TimeSpan.FromSeconds(10);
         Assert.Contains(validator.Validate(null, config).Failures!, failure =>
             failure.Contains("ShutdownFlushTimeout") && failure.Contains("retry delays"));
+    }
+
+    [Fact]
+    public void GeneratorMappingsAndLocationZonesUseTheSameSingletonSnapshot()
+    {
+        using var host = HostBootstrapper.BuildGeneratorHost();
+        Assert.Same(host.Services.GetRequiredService<SpeedListener.Services.IDeviceMappingProvider>(),
+            host.Services.GetRequiredService<SpeedListener.Services.ILocationTimeZoneProvider>());
     }
 
     private static SpeedListenerConfiguration ValidConfiguration() => new()

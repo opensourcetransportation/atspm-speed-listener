@@ -199,4 +199,23 @@ shipped. Coordinate lookup and fallback/mismatch warnings were removed. Docker T
 remains explicit and the listener uses Local. All timestamps/hour keys remain naive.
 Historical rows were not rewritten. Bad-coordinate, default-server-zone, explicit-override
 and version-boundary tests pass; the complete Windows and Linux suites have 210 tests; 12 server-zone tests also pass under Windows NLS.
-The two-hour test remains deferred; no new load test was run for this policy change.
+At that commit the two-hour test was deferred. The subsequent validation below
+supersedes that status without changing runtime code.
+
+## Completed server-time sustained test
+
+On October 15, revision `baacf4d` completed 7,200.003 seconds at 334 events/second
+using server/container local Mountain time. The isolated local PostgreSQL database
+was cleared of the preceding short-run events before starting. Generator, listener
+and decompressed storage all counted exactly 2,404,798 events across 1,233 devices,
+with no rejects, unknowns, drops, retries, publish failures or conflicts. The final
+queue was empty and both processes exited successfully.
+
+There were 3,699 unique stored rows across three hourly buckets, including one
+complete hour and two boundary crossings. Batch publication averaged 681.126 ms;
+p95 was 1,024.987 ms and maximum was 1,861.738 ms. Early-to-late full-hour averages
+increased from 457.919 to 1,039.310 ms, documenting the hourly row-growth cost.
+This closes the uniform two-hour validation item. Hot-device distribution, remaining
+live providers and agency/Windows deployment checks remain open. No application code
+or database configuration was changed by recording these results.
+See [results and resource samples](docker-load-test-results.md#october-15-server-time-two-hour-run).

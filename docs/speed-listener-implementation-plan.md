@@ -31,13 +31,15 @@ Latest recorded application validation: 210 Release tests passed on Windows and 
 in [the review history](pr-2-review-resolution.md) describe earlier revisions.
 The [October 9 Docker runs](docker-load-test-results.md) demonstrated short-run
 throughput on that revision; they are not current sustained-capacity evidence.
-The October 15 follow-up reconciled 100,955 events in a five-minute run before the
-user deferred the two-hour test. The sustained gate below remains open.
+The October 15 server-time revision `baacf4d` subsequently completed a two-hour
+uniform-distribution run at 334 events/second across 1,233 devices. All 2,404,798
+sent events were verified in decompressed PostgreSQL storage, with zero loss or
+publish conflicts. See [results and scope](docker-load-test-results.md#october-15-server-time-two-hour-run).
 
 ## Required before claiming sustained production readiness
 
 - [ ] Run the opt-in storage probe against actual SQL Server, MySQL and Oracle test engines. Current coverage for these is model/schema/compression only.
-- [ ] Run at least two hours of paced expected-peak traffic, including full-hour row growth, hourly boundaries, final drain and persisted-count reconciliation. Follow [the load-testing guide](load-testing.md).
+- [x] Run at least two hours of paced expected-peak traffic, including full-hour row growth, hourly boundaries, final drain and persisted-count reconciliation. Passed October 15 on `baacf4d` for uniform traffic across 1,233 devices; this does not close the distribution-specific or production checks below.
 - [ ] Include realistic per-device distribution and a hot-device scenario; record recent late-hour write times, CPU, memory, queue depth and errors rather than only lifetime averages.
 - [ ] Validate sensor formats and local wall-clock behavior against the agency's current stream and existing event-log/report conventions. Unsupported formats require their vendor specification.
 - [ ] Verify the actual network path, sensor destination port, firewall and service account on the deployment server. Loopback/Docker tests do not establish that path.

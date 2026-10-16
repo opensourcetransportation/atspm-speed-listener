@@ -129,6 +129,12 @@ prove that a firewall passed the traffic or that the database archived it.
 
 ## Sustained capacity release gate
 
+The two-hour uniform-distribution scenario passed on server-time revision `baacf4d`
+on October 15, 2026: 2,404,798 events sent and verified stored across 1,233 devices.
+See [the complete result and scope](docker-load-test-results.md#october-15-server-time-two-hour-run).
+Concentrated hot-device traffic and production/environment-specific checks remain
+outstanding. The instructions below describe how to repeat or extend the test.
+
 The five-minute test in `docker-load-test-results.md` does not validate a full
 hour's row growth. Run at least 7,200 seconds at the expected peak aggregate rate
 against isolated local test databases. For the UDOT target, 334 events/second is

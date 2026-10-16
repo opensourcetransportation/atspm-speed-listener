@@ -193,6 +193,11 @@ Oracle and SQLite. Live insert/append checks have passed for PostgreSQL and SQLi
 SQL Server/MySQL/Oracle live-engine checks remain outstanding. The opt-in
 `tests/DatabaseProviderSmoke` probe requires an empty disposable database.
 
+Revision `baacf4d` passed a [two-hour Docker/PostgreSQL test](docs/docker-load-test-results.md#october-15-server-time-two-hour-run)
+at 20,040 events/minute across 1,233 devices: all 2,404,798 sent events were verified
+stored, with zero loss or write conflicts. This validates the tested uniform
+distribution; concentrated hot-device and agency deployment checks remain open.
+
 The in-memory channel is bounded. When it is full, the newest event is dropped
 and counted in rate-limited summary logs. UDP itself is not reliable, and this release has no durable spool, so
 process crashes or sustained database outages can also lose events. Run only one

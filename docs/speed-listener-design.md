@@ -213,7 +213,7 @@ budgets must allow graceful drain. [Windows deployment](windows-service.md) and
 
 As of October 15, 2026, the server-time revision passes 210 Release C# tests on Windows and Linux. Real loopback tests cover
 IPv4/IPv6, and compressed SQLite tests cover duplicate preservation, append,
-acknowledgement loss and scoped conflicts. Multi-zone tests cover Utah, New York,
+acknowledgement loss and scoped conflicts. Timestamp and mapping tests cover
 DST, joined frames, ignored bad coordinates and server-local location-version cutoffs.
 Windows script tests mock service/firewall operations; CI is configured to run
 them under PowerShell 7 and Windows PowerShell 5.1, plus Linux .NET build/tests.
@@ -236,12 +236,18 @@ accepts a new empty disposable database through ATSPM_PROVIDER_SMOKE_CONNECTION
 and a provider-name argument. It creates test tables/data and rejects an existing
 schema; it does not delete a supplied database. Do not point it at agency databases.
 
-Remaining gates: live SQL Server/MySQL/Oracle probes; at least two hours of paced
-expected-peak traffic with growing hourly rows and stored-count reconciliation;
-representative hotspot distribution; agency packet/time comparisons; production
-soak/rollback and dependency/security review. Earlier
-[Docker results](docker-load-test-results.md) are historical short-run evidence,
-not validation of the latest build at sustained peak capacity. Monolith cleanup
+Revision `baacf4d` passed a two-hour local PostgreSQL run at 20,040 events/minute
+across 1,233 uniformly exercised devices. All 2,404,798 sent events were verified
+in decompressed storage, with zero rejects, drops, unknowns, retries or conflicts.
+The run crossed two hourly boundaries and included one full hourly growth cycle.
+Publication mean increased from 457.919 ms early in that complete hour to
+1,039.310 ms late in the hour; the final queue drained. See
+[results, resources and limitations](docker-load-test-results.md#october-15-server-time-two-hour-run).
+
+Remaining gates: live SQL Server/MySQL/Oracle probes; representative hotspot
+distribution; agency packet/time comparisons; production soak/rollback and
+dependency/security review. The Docker result does not establish remote Windows
+service or agency-network capacity. Monolith cleanup
 is a separate change after deployment and consumer dependency review.
 
 

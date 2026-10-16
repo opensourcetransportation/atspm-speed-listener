@@ -1,34 +1,37 @@
 #region license
 // Copyright 2026 Utah Departement of Transportation
-// for SpeedListener - SpeedListener.Commands/ListenerCommand.cs
-// 
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-// 
-// http://www.apache.org/licenses/LICENSE-2.
-// 
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// Licensed under the Apache License, Version 2.0.
 #endregion
 
 using System.CommandLine;
+using System.CommandLine.Invocation;
 
-namespace SpeedListener.Commands
+namespace SpeedListener.Commands;
+
+/// <summary>Starts the UDP speed sensor listener.</summary>
+public sealed class ListenerCommand : Command
 {
-    /// <summary>
-    /// Command for starting the speed sensor data listener service.
-    /// </summary>
-    public class ListenerCommand : Command
+    private static readonly Option<int?> PortOption = new(
+        aliases: ["--port", "-p"],
+        description: "UDP port on which speed sensor packets are received.");
+
+    /// <summary>Initializes the listener command.</summary>
+    public ListenerCommand() : base("listener", "Starts the UDP speed sensor listener")
     {
-        /// <summary>
-        /// Initializes a new instance of the <see cref="ListenerCommand"/> class.
-        /// </summary>
-        public ListenerCommand() : base("listener", "Starts listener on configured port and protocol")
+        AddOption(PortOption);
+        this.SetHandler(RunListenerAsync);
+    }
+
+    private static async Task RunListenerAsync(InvocationContext context)
+    {
+        await HostBootstrapper.RunListenerHostAsync(configuration =>
         {
-        }
+            var result = context.ParseResult.FindResultFor(PortOption);
+            if (result is not null && !result.IsImplicit)
+            {
+                var port = context.ParseResult.GetValueForOption(PortOption);
+                if (port.HasValue) configuration.UdpPort = port.Value;
+            }
+        });
     }
 }

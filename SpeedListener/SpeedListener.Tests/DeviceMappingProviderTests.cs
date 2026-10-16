@@ -1,0 +1,294 @@
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
+using Moq;
+using SpeedListener.Configuration;
+using SpeedListener.Services;
+using Utah.Udot.Atspm.Data;
+using Utah.Udot.Atspm.Data.Enums;
+using Utah.Udot.Atspm.Data.Models;
+
+namespace SpeedListener.Tests;
+
+public sealed class DeviceMappingProviderTests
+{
+    [Fact]
+    public async Task GetMappingsAsync_SelectsCurrentVersionThenLowestSpeedDeviceId()
+    {
+        await using var services = CreateServices();
+        var old = Device(1, "old", DeviceTypes.SpeedSensor, "5026");
+        old.Location.Start = new DateTime(2020, 1, 1);
+        var current = Device(20, "unrelated-device-name", DeviceTypes.SpeedSensor, "5026");
+        current.Location.Start = new DateTime(2025, 1, 1);
+        var second = Device(30, "second", DeviceTypes.SpeedSensor, "5026");
+        second.Location = current.Location;
+        var controller = Device(2, "controller", DeviceTypes.SignalController, "5026");
+        controller.Location = current.Location;
+        var future = Device(40, "future", DeviceTypes.SpeedSensor, "5026");
+        future.Location.Start = new DateTime(2030, 1, 1);
+        var deleted = Device(50, "deleted", DeviceTypes.SpeedSensor, "5026");
+        deleted.Location.Start = new DateTime(2021, 1, 1);
+        deleted.Location.VersionAction = LocationVersionActions.Delete;
+        await SeedAsync(services, old, current, second, controller, future, deleted);
+
+        var mappings = await CreateProvider(services, timeProvider: new MutableTimeProvider())
+            .GetMappingsAsync(CancellationToken.None);
+
+        Assert.Equal(20, Assert.Single(mappings).Value.DeviceId);
+        Assert.Equal("5026", Assert.Single(mappings).Key);
+    }
+
+    [Fact]
+    public async Task GetMappingsAsync_DeletedNewestVersion_FallsBackToLatestNonDeletedVersion()
+    {
+        await using var services = CreateServices();
+        var old = Device(1, "old", DeviceTypes.SpeedSensor, "5026");
+        old.Location.Start = new DateTime(2020, 1, 1);
+        var deleted = Device(2, "deleted", DeviceTypes.SpeedSensor, "5026");
+        deleted.Location.Start = new DateTime(2025, 1, 1);
+        deleted.Location.VersionAction = LocationVersionActions.Delete;
+        await SeedAsync(services, old, deleted, Device(3, "other", DeviceTypes.SpeedSensor, "5271"));
+        var mappings = await CreateProvider(services).GetMappingsAsync(CancellationToken.None);
+        Assert.Equal(1, mappings["5026"].DeviceId);
+        Assert.True(mappings.ContainsKey("5271"));
+    }
+
+    [Fact]
+    public async Task RefreshAsync_LastLocationDeleted_ClearsCacheInsteadOfRetainingOldMapping()
+    {
+        await using var services = CreateServices();
+        var old = Device(1, "old", DeviceTypes.SpeedSensor, "5026");
+        old.Location.Start = new DateTime(2020, 1, 1);
+        await SeedAsync(services, old);
+        var clock = new MutableTimeProvider();
+        var metrics = new SpeedListenerMetrics(clock);
+        var provider = CreateProvider(services, metrics, clock);
+        Assert.Single(await provider.GetMappingsAsync(CancellationToken.None));
+        await using (var scope = services.CreateAsyncScope())
+        {
+            var context = scope.ServiceProvider.GetRequiredService<ConfigContext>();
+            (await context.Locations.SingleAsync()).VersionAction = LocationVersionActions.Delete;
+            await context.SaveChangesAsync();
+        }
+        clock.Advance(TimeSpan.FromMinutes(6));
+        Assert.Empty(await provider.GetMappingsAsync(CancellationToken.None));
+        Assert.Equal(0, metrics.MappingRefreshFailures);
+    }
+
+    [Fact]
+    public async Task RefreshAsync_CancelledAfterLoad_PropagatesWithoutFailureMetric()
+    {
+        await using var services = CreateServices();
+        await SeedAsync(services, Device(1, "sensor", DeviceTypes.SpeedSensor, "5026"));
+        var clock = new MutableTimeProvider();
+        var metrics = new SpeedListenerMetrics(clock);
+        using var cancellation = new CancellationTokenSource();
+        var factory = new Mock<IServiceScopeFactory>();
+        factory.SetupSequence(value => value.CreateScope())
+            .Returns(() => services.CreateScope())
+            .Returns(() => { cancellation.Cancel(); throw new OperationCanceledException(cancellation.Token); });
+        var provider = new DeviceMappingProvider(factory.Object,
+            Options.Create(new SpeedListenerConfiguration()), clock, metrics, NullLogger<DeviceMappingProvider>.Instance);
+        await provider.GetMappingsAsync(CancellationToken.None);
+        clock.Advance(TimeSpan.FromMinutes(6));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => provider.RefreshAsync(cancellation.Token));
+        Assert.Equal(0, metrics.MappingRefreshFailures);
+    }
+
+    [Fact]
+    public async Task GetMappingsAsync_TiedCurrentDates_ReportsAmbiguousRows()
+    {
+        await using var services = CreateServices();
+        await SeedAsync(services, Device(1, "controller1", DeviceTypes.SignalController, "5026"),
+            Device(2, "controller2", DeviceTypes.SignalController, "5026"));
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => CreateProvider(services).GetMappingsAsync(CancellationToken.None));
+        Assert.Contains("1 duplicate", error.Message);
+    }
+
+    [Fact]
+    public async Task GetMappingsAsync_CurrentVersionWithoutSpeedDevice_DoesNotUseOldVersion()
+    {
+        await using var services = CreateServices();
+        var old = Device(1, "old", DeviceTypes.SpeedSensor, "5026");
+        old.Location.Start = new DateTime(2020, 1, 1);
+        var current = Device(2, "controller", DeviceTypes.SignalController, "5026");
+        current.Location.Start = new DateTime(2025, 1, 1);
+        await SeedAsync(services, old, current, Device(3, "other", DeviceTypes.SpeedSensor, "5271"));
+        var mappings = await CreateProvider(services).GetMappingsAsync(CancellationToken.None);
+        Assert.False(mappings.ContainsKey("5026"));
+        Assert.True(mappings.ContainsKey("5271"));
+    }
+
+    [Fact]
+    public async Task GetMappingsAsync_LoadsOnlyNormalizedSpeedSensorMappings()
+    {
+        await using var services = CreateServices();
+        await SeedAsync(services,
+            Device(2, " camera ", DeviceTypes.AICamera, "5271"),
+            Device(1, " sensor-1 ", DeviceTypes.SpeedSensor, "5026"));
+        var provider = CreateProvider(services);
+
+        var mappings = await provider.GetMappingsAsync(CancellationToken.None);
+
+        var mapping = Assert.Single(mappings);
+        Assert.Equal("5026", mapping.Key);
+        Assert.False(mappings.ContainsKey("sensor-1"));
+        Assert.Equal(1, mapping.Value.DeviceId);
+        Assert.Equal("5026", mapping.Value.LocationIdentifier);
+    }
+
+    [Fact]
+    public async Task GetMappingsAsync_NoValidSpeedSensors_FailsInitialLoad()
+    {
+        await using var services = CreateServices();
+        await SeedAsync(services, Device(1, "camera", DeviceTypes.AICamera, "5026"));
+        var metrics = new SpeedListenerMetrics(TimeProvider.System);
+        var provider = CreateProvider(services, metrics);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => provider.GetMappingsAsync(CancellationToken.None));
+
+        Assert.Contains("No valid speed-sensor mappings", exception.Message);
+        Assert.Equal(1, metrics.MappingRefreshFailures);
+    }
+
+    [Fact]
+    public async Task RefreshAsync_AfterSuccessfulLoad_RetainsLastMappingWhenDatabaseFails()
+    {
+        var services = CreateServices();
+        await SeedAsync(services, Device(1, "sensor-1", DeviceTypes.SpeedSensor, "5026"));
+        var timeProvider = new MutableTimeProvider();
+        var metrics = new SpeedListenerMetrics(timeProvider);
+        var provider = CreateProvider(services, metrics, timeProvider);
+        var initial = await provider.GetMappingsAsync(CancellationToken.None);
+        await services.DisposeAsync();
+        timeProvider.Advance(TimeSpan.FromMinutes(6));
+
+        await provider.RefreshAsync(CancellationToken.None);
+        var retained = await provider.GetMappingsAsync(CancellationToken.None);
+
+        Assert.Same(initial, retained);
+        Assert.Equal(1, retained["5026"].DeviceId);
+        Assert.Equal(2, metrics.MappingRefreshFailures);
+    }
+
+    [Theory]
+    [InlineData(DeviceStatus.Unknown)]
+    [InlineData(DeviceStatus.Decommissioned)]
+    [InlineData(DeviceStatus.Inactive)]
+    [InlineData(DeviceStatus.Testing)]
+    [InlineData(DeviceStatus.Staging)]
+    public async Task GetMappingsAsync_SkipsNonActiveSpeedDevices(DeviceStatus status)
+    {
+        await using var services = CreateServices();
+        var inactive = Device(1, "old-sensor", DeviceTypes.SpeedSensor, "5026");
+        inactive.DeviceStatus = status;
+        var active = Device(2, "replacement", DeviceTypes.SpeedSensor, "5026");
+        active.Location = inactive.Location;
+        await SeedAsync(services, inactive, active);
+        Assert.Equal(2, (await CreateProvider(services).GetMappingsAsync(CancellationToken.None))["5026"].DeviceId);
+    }
+
+    [Fact]
+    public async Task GetMappingsAsync_CurrentVersionWithoutActiveSensor_DoesNotUseHistoricalDevice()
+    {
+        await using var services = CreateServices();
+        var old = Device(1, "old", DeviceTypes.SpeedSensor, "5026");
+        old.Location.Start = new DateTime(2020, 1, 1);
+        var current = Device(2, "inactive", DeviceTypes.SpeedSensor, "5026");
+        current.Location.Start = new DateTime(2025, 1, 1);
+        current.DeviceStatus = DeviceStatus.Inactive;
+        await SeedAsync(services, old, current, Device(3, "other", DeviceTypes.SpeedSensor, "5271"));
+        Assert.False((await CreateProvider(services).GetMappingsAsync(CancellationToken.None)).ContainsKey("5026"));
+    }
+
+    [Theory]
+    [InlineData("502")]
+    [InlineData("50260")]
+    [InlineData("1234567890")]
+    [InlineData("ABCD")]
+    public async Task GetMappingsAsync_ReportsUnroutableIdentifiers(string identifier)
+    {
+        await using var services = CreateServices();
+        await SeedAsync(services, Device(1, "invalid", DeviceTypes.SpeedSensor, identifier));
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            CreateProvider(services).GetMappingsAsync(CancellationToken.None));
+        Assert.Contains("1 invalid", error.Message);
+    }
+
+    private static ServiceProvider CreateServices()
+    {
+        var services = new ServiceCollection();
+        var databaseName = $"mapping-tests-{Guid.NewGuid():N}";
+        services.AddDbContext<ConfigContext>(options =>
+            options.UseInMemoryDatabase(databaseName));
+        return services.BuildServiceProvider();
+    }
+
+    private static DeviceMappingProvider CreateProvider(
+        ServiceProvider services,
+        SpeedListenerMetrics? metrics = null,
+        TimeProvider? timeProvider = null) =>
+        new(
+            services.GetRequiredService<IServiceScopeFactory>(),
+            Options.Create(new SpeedListenerConfiguration
+            {
+                DeviceMappingRefreshInterval = TimeSpan.FromMinutes(5)
+            }),
+            timeProvider ?? TimeProvider.System,
+            metrics ?? new SpeedListenerMetrics(TimeProvider.System),
+            NullLogger<DeviceMappingProvider>.Instance);
+
+    [Fact]
+    public async Task MappingCutoffUsesAgencyWallClockRatherThanUtc()
+    {
+        await using var services = CreateServices();
+        var old = Device(1, "old", DeviceTypes.SpeedSensor, "5271");
+        old.Location.Start = new DateTime(2026, 9, 3, 0, 0, 0);
+        var next = Device(2, "new", DeviceTypes.SpeedSensor, "5271");
+        next.Location.Start = new DateTime(2026, 9, 3, 8, 0, 0);
+        await SeedAsync(services, old, next);
+        var clock = new MutableTimeProvider(); // 12:00 UTC, 06:00 America/Denver.
+        var metrics = new SpeedListenerMetrics(clock);
+        var provider = new DeviceMappingProvider(services.GetRequiredService<IServiceScopeFactory>(),
+            Options.Create(new SpeedListenerConfiguration { EventTimeZoneId = "America/Denver" }),
+            clock, metrics, NullLogger<DeviceMappingProvider>.Instance);
+        Assert.Equal(1, (await provider.GetMappingsAsync(CancellationToken.None))["5271"].DeviceId);
+        clock.Advance(TimeSpan.FromHours(2));
+        Assert.Equal(2, (await provider.GetMappingsAsync(CancellationToken.None))["5271"].DeviceId);
+    }
+
+    private static async Task SeedAsync(ServiceProvider services, params Device[] devices)
+    {
+        await using var scope = services.CreateAsyncScope();
+        var context = scope.ServiceProvider.GetRequiredService<ConfigContext>();
+        context.Devices.AddRange(devices);
+        await context.SaveChangesAsync();
+    }
+
+    private static Device Device(int id, string identifier, DeviceTypes type, string locationIdentifier) => new()
+    {
+        Id = id,
+        DeviceIdentifier = identifier,
+        DeviceType = type,
+        DeviceStatus = DeviceStatus.Active,
+        Ipaddress = "127.0.0.1",
+        Location = new Location
+        {
+            Id = id,
+            LocationIdentifier = locationIdentifier,
+            PrimaryName = $"Location {locationIdentifier}",
+            Note = string.Empty
+        }
+    };
+
+    private sealed class MutableTimeProvider : TimeProvider
+    {
+        private DateTimeOffset _utcNow = new(2026, 9, 3, 12, 0, 0, TimeSpan.Zero);
+
+        public override DateTimeOffset GetUtcNow() => _utcNow;
+
+        public void Advance(TimeSpan elapsed) => _utcNow += elapsed;
+    }
+}

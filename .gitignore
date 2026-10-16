@@ -51,6 +51,10 @@ Mkfile.old
 dkms.conf
 
 # Build artifacts
+/build/
+*.pcapng
+*.etl
+**/.upgrade-backups/
 **/bin/
 **/obj/
 .dotnet/
@@ -88,6 +92,7 @@ appsettings.*.json
 
 # Secret files
 secrets.json
+*.env
 
 # Certificates and keys
 *.pfx

@@ -33,6 +33,20 @@ namespace SpeedListener.Tests;
 /// </summary>
 public class SpeedEmitterServiceTests
 {
+    [Fact]
+    public void CreateSpeedPacket_NumericDetector_RoundTripsThroughValidatedParser()
+    {
+        var service = new SpeedEmitterService(_options, _deviceRepositoryMock.Object, _loggerMock.Object);
+        var packet = service.CreateSpeedPacket("502620", 41, 66);
+        var result = new SpeedListener.Parsing.SpeedPacketParser().Parse(
+            new SpeedListener.Receivers.UdpDatagram(packet,
+                new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, 10088), DateTimeOffset.UtcNow));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("502620", result.Event!.DetectorId);
+        Assert.Equal(41, result.Event.Mph);
+    }
+
     private readonly Mock<IDeviceRepository> _deviceRepositoryMock;
     private readonly Mock<ILogger<SpeedEmitterService>> _loggerMock;
     private readonly SpeedEmitterConfiguration _config;
@@ -112,7 +126,7 @@ public class SpeedEmitterServiceTests
         Assert.Equal(30, result[8]);
         Assert.Equal(48, result[9]);
         var extractedId = Encoding.ASCII.GetString(result, 10, 6);
-        Assert.Equal(6, extractedId.Length);
+        Assert.Equal("      ", extractedId);
     }
 
     /// <summary>
@@ -180,12 +194,18 @@ public class SpeedEmitterServiceTests
 
         _deviceRepositoryMock.Setup(r => r.GetList()).Returns(devices.AsQueryable());
 
+        using var listener = new UdpClient(0);
+        _config.ListenerPort = ((System.Net.IPEndPoint)listener.Client.LocalEndPoint!).Port;
         var service = new SpeedEmitterService(_options, _deviceRepositoryMock.Object, _loggerMock.Object);
 
-        using var listener = new UdpClient(1088);
-
         var result = await service.EmitSampleAsync(CancellationToken.None);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var received = await listener.ReceiveAsync(timeout.Token);
 
         Assert.True(result);
+        Assert.Equal(16, received.Buffer.Length);
+        Assert.InRange(received.Buffer[8], 20, 79);
+        Assert.Equal((byte)(received.Buffer[8] * 1.609), received.Buffer[9]);
+        Assert.Equal("SPD100", Encoding.ASCII.GetString(received.Buffer, 10, 6));
     }
 }

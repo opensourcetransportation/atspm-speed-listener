@@ -68,7 +68,7 @@ public partial class SpeedEmitterLogMessages
     /// <param name="mph">The speed in miles per hour.</param>
     /// <param name="kph">The speed in kilometers per hour.</param>
     /// <param name="timestamp">The timestamp of transmission.</param>
-    [LoggerMessage(EventId = 2004, EventName = "Packet Sent", Level = LogLevel.Information, Message = "Sent {protocol} packet [{sensorId}, {mph}mph/{kph}kph] at {timestamp}")]
+    [LoggerMessage(EventId = 2004, EventName = "Packet Sent", Level = LogLevel.Debug, Message = "Sent {protocol} packet [{sensorId}, {mph}mph/{kph}kph] at {timestamp}")]
     public partial void PacketSent(ProtocolType protocol, string sensorId, int mph, int kph, DateTime timestamp);
 
     /// <summary>
